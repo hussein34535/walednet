@@ -1,0 +1,28 @@
+pluginManagement {
+    def flutterSdkPath = System.properties['flutter.sdk']?.toString()
+    if (flutterSdkPath == null) {
+        flutterSdkPath = System.env.FLUTTER_SDK
+    }
+    if (flutterSdkPath == null) {
+        // Fallback to local.properties if flutter.sdk is not set as a system property or environment variable
+        def properties = new Properties()
+        file("local.properties").withInputStream { properties.load(it) }
+        flutterSdkPath = properties.getProperty("flutter.sdk")
+    }
+    
+    if (flutterSdkPath == null) {
+        throw new IllegalStateException("Flutter SDK not found. Define location with flutter.sdk in the local.properties file, or with the FLUTTER_SDK environment variable.")
+    }
+
+    includeBuild "$flutterSdkPath/packages/flutter_tools/gradle"
+
+    repositories {
+        google()
+        mavenCentral()
+        gradlePluginPortal()
+    }
+}
+
+rootProject.name = "WALEDSSH"
+
+include ':app' 

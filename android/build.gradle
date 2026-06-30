@@ -1,0 +1,48 @@
+buildscript {
+    repositories {
+        google()
+        mavenCentral()
+        // For Fabric Crashlytics and other Fabric components
+        // maven { url "https://maven.fabric.io/public" }
+    }
+    dependencies {
+        classpath 'com.android.tools.build:gradle:8.11.1'
+        classpath 'org.jetbrains.kotlin:kotlin-gradle-plugin:2.2.20'
+        classpath 'com.google.gms:google-services:4.4.2'
+    }
+}
+
+allprojects {
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+
+rootProject.buildDir = '../build'
+subprojects {
+    project.buildDir = "${rootProject.buildDir}/${project.name}"
+}
+subprojects {
+    project.plugins.withId('com.android.library') {
+        android {
+            compileSdk 36
+        }
+    }
+    project.plugins.withId('com.android.application') {
+        android {
+            compileSdk 36
+        }
+    }
+}
+subprojects {
+    project.evaluationDependsOn(':app')
+}
+
+tasks.whenTaskAdded { task ->
+    if (task.name == 'clean') {
+        task.doLast {
+            delete rootProject.buildDir
+        }
+    }
+} 

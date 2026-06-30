@@ -1,0 +1,49 @@
+{
+  "project_info": {
+    "project_number": "289358660533",
+    "firebase_url": "https://waledpro-f-default-rtdb.firebaseio.com",
+    "project_id": "waledpro-f",
+    "storage_bucket": "waledpro-f.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:289358660533:android:1d0f20f362d6c3f5990ffc",
+        "android_client_info": {
+          "package_name": "com.waled.net"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCr9OjGefTUtCM5a58j4kxNrl-8iPOiHSc"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:289358660533:android:00039db78a61056b990ffc",
+        "android_client_info": {
+          "package_name": "com.waledpro.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCr9OjGefTUtCM5a58j4kxNrl-8iPOiHSc"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
