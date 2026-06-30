@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:ui';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:flutter/material.dart';
@@ -67,9 +68,19 @@ class _MyHomePageState extends State<MyHomePage> with SingleTickerProviderStateM
   final Uri _subscriptionUrl = Uri.parse('https://t.me/D_S_D_Cbot');
   final Uri _developerUrl = Uri.parse('https://t.me/he_s_en');
 
+  AppLifecycleListener? _lifecycleListener;
+
   @override
   void initState() {
     super.initState();
+    if (Platform.isWindows) {
+      _lifecycleListener = AppLifecycleListener(
+        onExitRequested: () async {
+          await WindowsVpnManager.stopVpn();
+          return AppExitResponse.exit;
+        },
+      );
+    }
     _pulseController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 1500),
@@ -491,6 +502,18 @@ class _MyHomePageState extends State<MyHomePage> with SingleTickerProviderStateM
       _buttonText = 'جاري الاتصال...';
       return;
     }
+    
+    if (Platform.isWindows) {
+      if (_vpnStatus == 'CONNECTED') {
+        _buttonText = 'متصل';
+      } else if (_vpnStatus == 'CONNECTING') {
+        _buttonText = 'جاري الاتصال...';
+      } else {
+        _buttonText = 'اتصال';
+      }
+      return;
+    }
+
     switch (_status?.state) {
       case 'CONNECTED':
         _buttonText = _isConnectionVerified ? 'متصل' : 'جاري الاتصال...';
@@ -869,7 +892,7 @@ class _MyHomePageState extends State<MyHomePage> with SingleTickerProviderStateM
         });
       } else {
         timer.cancel();
-        if (_status?.state == 'CONNECTED') {
+        if (_status?.state == 'CONNECTED' || _vpnStatus == 'CONNECTED') {
           _toggleVpn();
         }
       }
@@ -1106,7 +1129,7 @@ class _MyHomePageState extends State<MyHomePage> with SingleTickerProviderStateM
   }
 
   Widget _buildConnectButton() {
-    final isConnected = _status?.state == 'CONNECTED';
+    final isConnected = _status?.state == 'CONNECTED' || _vpnStatus == 'CONNECTED';
     final theme = Theme.of(context);
     final themeProvider = Provider.of<ThemeProvider>(context, listen: false);
 
@@ -2086,9 +2109,18 @@ class _MyHomePageState extends State<MyHomePage> with SingleTickerProviderStateM
         }
       }
 
+      List<String>? bypassSubnets;
+      if (url.startsWith('ssh://')) {
+        final String vpnIp = Uri.parse(url).host;
+        if (RegExp(r'^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$').hasMatch(vpnIp)) {
+          bypassSubnets = [vpnIp];
+        }
+      }
+
       await _vpnService.startV2Ray(
         remark: url.startsWith('ssh://') ? 'WaledNet SSH: متصل وآمن 🛡️' : 'WaledNet VPN: متصل وآمن 🛡️',
         config: jsonEncode(_config),
+        bypassSubnets: bypassSubnets,
       );
     } else {
       if (mounted) {
@@ -2104,6 +2136,7 @@ class _MyHomePageState extends State<MyHomePage> with SingleTickerProviderStateM
 
   @override
   void dispose() {
+    _lifecycleListener?.dispose();
     _pulseController.dispose();
     _timer?.cancel();
     _adLoadTimer?.cancel();

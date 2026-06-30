@@ -30,6 +30,18 @@ class SshTunnelService {
     await stopTunnel(); // Make sure previous tunnel is closed
     _isClosed = false;
 
+    if (Platform.isWindows) {
+      // تحرير المنفذ من أية اتصالات قديمة عالقة في الخلفية
+      try {
+        await Process.run('powershell', [
+          '-Command',
+          '\$conn = Get-NetTCPConnection -LocalPort $localPort -ErrorAction SilentlyContinue; if (\$conn) { Stop-Process -Id \$conn.OwningProcess -Force -ErrorAction SilentlyContinue }'
+        ]);
+      } catch (e) {
+        print('[SshTunnelService] Error clearing port $localPort: $e');
+      }
+    }
+
     try {
       Socket baseSocket;
 

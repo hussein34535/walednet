@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
@@ -15,6 +16,23 @@ class ThemeProvider with ChangeNotifier {
     notifyListeners();
   }
 
+  static TextTheme _getTextTheme(bool isDark) {
+    final baseTheme = TextTheme(
+      headlineMedium: TextStyle(
+        fontWeight: FontWeight.bold,
+        color: isDark ? Colors.white : Colors.black,
+      ),
+      bodyLarge: TextStyle(color: isDark ? Colors.white : Colors.black),
+      labelLarge: TextStyle(color: isDark ? Colors.white70 : Colors.black54),
+    );
+
+    if (Platform.isWindows) {
+      return baseTheme;
+    }
+
+    return GoogleFonts.cairoTextTheme(baseTheme);
+  }
+
   static final ThemeData _darkTheme = ThemeData(
     brightness: Brightness.dark,
     colorScheme: ColorScheme.fromSeed(
@@ -25,16 +43,7 @@ class ThemeProvider with ChangeNotifier {
       surface: const Color(0xFF1C1C1E), // Apple System Gray 6 (Dark Card)
       onSurface: Colors.white,
     ),
-    textTheme: GoogleFonts.cairoTextTheme(
-      const TextTheme(
-        headlineMedium: TextStyle(
-          fontWeight: FontWeight.bold,
-          color: Colors.white,
-        ),
-        bodyLarge: TextStyle(color: Colors.white),
-        labelLarge: TextStyle(color: Colors.white70),
-      ),
-    ),
+    textTheme: _getTextTheme(true),
     iconTheme: const IconThemeData(color: Colors.white),
     cardTheme: CardThemeData(
       elevation: 0,
@@ -57,16 +66,7 @@ class ThemeProvider with ChangeNotifier {
       surface: Colors.white, // White cards
       onSurface: Colors.black, // Black text on cards
     ),
-    textTheme: GoogleFonts.cairoTextTheme(
-      const TextTheme(
-        headlineMedium: TextStyle(
-          fontWeight: FontWeight.bold,
-          color: Colors.black,
-        ),
-        bodyLarge: TextStyle(color: Colors.black),
-        labelLarge: TextStyle(color: Colors.black54),
-      ),
-    ),
+    textTheme: _getTextTheme(false),
     iconTheme: const IconThemeData(color: Colors.black87),
     cardTheme: CardThemeData(
       elevation: 0,

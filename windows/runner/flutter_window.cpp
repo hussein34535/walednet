@@ -1,6 +1,7 @@
 #include "flutter_window.h"
 
 #include <optional>
+#include <shellapi.h>
 
 #include "flutter/generated_plugin_registrant.h"
 
@@ -31,15 +32,25 @@ bool FlutterWindow::OnCreate() {
     this->Show();
   });
 
-  // Flutter can complete the first frame before the "show window" callback is
-  // registered. The following call ensures a frame is pending to ensure the
-  // window is shown. It is a no-op if the first frame hasn't completed yet.
+  // Force show the window immediately on startup
+  this->Show();
+
   flutter_controller_->ForceRedraw();
 
   return true;
 }
 
 void FlutterWindow::OnDestroy() {
+  // Clean up VPN processes and delete Wintun routing rules on exit
+  ShellExecuteW(
+      NULL,
+      L"runas",
+      L"powershell.exe",
+      L"-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command \"taskkill /F /IM xray.exe; taskkill /F /IM tun2socks.exe; route delete 0.0.0.0 mask 128.0.0.0 192.168.123.1; route delete 128.0.0.0 mask 128.0.0.0 192.168.123.1\"",
+      NULL,
+      SW_HIDE
+  );
+
   if (flutter_controller_) {
     flutter_controller_ = nullptr;
   }

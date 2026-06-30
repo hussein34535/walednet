@@ -25,6 +25,7 @@ class _UpdateCheckPageState extends State<UpdateCheckPage> {
   }
 
   Future<void> _checkForUpdate() async {
+    await Future.delayed(Duration.zero);
     try {
       if (!Platform.isAndroid && !Platform.isIOS) {
         _navigateToHome();
