@@ -14,8 +14,10 @@ class SshTunnelService {
   SSHClient? _sshClient;
   ServerSocket? _socksServer;
   bool _isClosed = true;
+  int _sshLocalPort = -1;
 
   bool get isActive => _sshClient != null && !_isClosed;
+  int get sshLocalPort => _sshLocalPort;
 
   Future<void> startTunnel({
     required String host,
@@ -45,7 +47,8 @@ class SshTunnelService {
     try {
       print('[SshTunnelService] Connecting to base socket: $host:$port');
       Socket baseSocket = await Socket.connect(host, port, timeout: const Duration(seconds: 10));
-      print('[SshTunnelService] Base socket connected.');
+      _sshLocalPort = baseSocket.port;
+      print('[SshTunnelService] Base socket connected. Local port: $_sshLocalPort');
 
       if (useSsl) {
         final sniHeader = (sni != null && sni.isNotEmpty) ? sni : host;
@@ -342,6 +345,7 @@ class SshTunnelService {
 
   Future<void> stopTunnel() async {
     _isClosed = true;
+    _sshLocalPort = -1;
 
     try {
       await _socksServer?.close();

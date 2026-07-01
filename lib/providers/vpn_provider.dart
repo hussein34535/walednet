@@ -129,73 +129,7 @@ class VpnProvider with ChangeNotifier {
             if (ip != null) {
               print('[_onStatusChanged] VPN Public IP Address: {"ip":"$ip"}');
             } else {
-              print('[_onStatusChanged] fetchIpThroughProxy failed, trying direct fallback...');
-              // Try direct HTTP through 10809 (SSH tunnel) — uses 1.1.1.1 IP directly, no DNS
-              try {
-                final socket = await Socket.connect('127.0.0.1', 10809,
-                    timeout: const Duration(seconds: 4));
-                final completer = Completer<String?>();
-                var state = 0;
-                final responseData = BytesBuilder();
-                socket.listen(
-                  (data) {
-                    if (state == 0) {
-                      if (data.length >= 2 && data[0] == 0x05 && data[1] == 0x00) {
-                        state = 1;
-                        final req = BytesBuilder();
-                        req.add([0x05, 0x01, 0x00, 0x01, 0x01, 0x01, 0x01, 0x01, 0x00, 0x50]);
-                        socket.add(req.takeBytes());
-                      } else {
-                        completer.complete(null);
-                        socket.destroy();
-                      }
-                    } else if (state == 1) {
-                      if (data.length >= 2 && data[0] == 0x05 && data[1] == 0x00) {
-                        state = 2;
-                        socket.add(utf8.encode('GET /cdn-cgi/trace HTTP/1.1\r\nHost: 1.1.1.1\r\nConnection: close\r\n\r\n'));
-                      } else {
-                        completer.complete(null);
-                        socket.destroy();
-                      }
-                    } else if (state == 2) {
-                      responseData.add(data);
-                    }
-                  },
-                  onDone: () {
-                    if (!completer.isCompleted) {
-                      try {
-                        final httpResponse = utf8.decode(responseData.takeBytes());
-                        for (final line in httpResponse.split('\n')) {
-                          if (line.startsWith('ip=')) {
-                            final ip = line.substring(3).trim();
-                            if (ip.isNotEmpty) {
-                              completer.complete(ip);
-                              return;
-                            }
-                          }
-                        }
-                        completer.complete(null);
-                      } catch (_) {
-                        completer.complete(null);
-                      }
-                    }
-                    socket.destroy();
-                  },
-                  onError: (e) {
-                    if (!completer.isCompleted) completer.complete(null);
-                    socket.destroy();
-                  },
-                );
-                socket.add([0x05, 0x01, 0x00]);
-                final fallbackIp = await completer.future.timeout(const Duration(seconds: 5), onTimeout: () => null);
-                if (fallbackIp != null) {
-                  print('[_onStatusChanged] VPN Public IP Address (Fallback): {"ip":"$fallbackIp"}');
-                } else {
-                  print('[_onStatusChanged] Fallback also failed - all proxy methods exhausted');
-                }
-              } catch (e) {
-                print('[_onStatusChanged] Fallback error: $e');
-              }
+              print('[_onStatusChanged] fetchIpThroughProxy failed - IP check through tunnel unavailable');
             }
           } catch (e) {
             print('[_onStatusChanged] Failed to fetch VPN Public IP: $e');
@@ -504,6 +438,12 @@ class VpnProvider with ChangeNotifier {
   }
 
   Future<void> _connectToVpn() async {
+    // Cleanup any lingering connections before starting fresh
+    await _vpnService.stopV2Ray();
+    await SshTunnelService().stopTunnel();
+    _logTimer?.cancel();
+    _logTimer = null;
+
     _isConnectingUserTrigger = true;
     notifyListeners();
 
@@ -571,26 +511,26 @@ class VpnProvider with ChangeNotifier {
       } else {
         // Android / iOS
         print('[_connectToVpn] Starting connection process for Android/iOS');
+        final bool isSsh = url.startsWith('ssh://');
+        
         print('[_connectToVpn] Resolving config details...');
         await _initializeV2Ray();
         print('[_connectToVpn] Done initializing config details. Config keys: ${_config.keys.toList()}');
 
-        if (url.startsWith('ssh://')) {
-          print('[_connectToVpn] SSH connection URL detected.');
+        // SSH tunnel after config is ready (before TUN starts)
+        if (isSsh) {
           final sshParams = UrlParserService.parseSshUrl(url);
           if (sshParams == null) {
-            print('[_connectToVpn] Error: Failed to parse SSH URL.');
+            print('[_connectToVpn] Failed to parse SSH URL');
             _isConnectingUserTrigger = false;
             notifyListeners();
             return;
           }
-
+          print('[_connectToVpn] Starting SSH tunnel...');
+          _isVerifyingConnection = true;
+          _buttonText = 'جاري الاتصال...';
+          notifyListeners();
           try {
-            _isVerifyingConnection = true;
-            _buttonText = 'جاري الاتصال...';
-            notifyListeners();
-
-            print('[_connectToVpn] Attempting to start SSH Tunnel...');
             await SshTunnelService().startTunnel(
               host: sshParams['host'],
               port: sshParams['port'],
@@ -604,7 +544,7 @@ class VpnProvider with ChangeNotifier {
             );
             print('[_connectToVpn] SSH Tunnel started successfully.');
           } catch (e) {
-            print('[_connectToVpn] SSH Tunnel failed to start: $e');
+            print('[_connectToVpn] SSH Tunnel failed: $e');
             _isConnectingUserTrigger = false;
             _isVerifyingConnection = false;
             _updateButtonState();
@@ -618,22 +558,42 @@ class VpnProvider with ChangeNotifier {
         
         try {
           print('[_connectToVpn] Starting V2Ray Core/VPN Tunnel. ProxyOnly = false');
-          // NOTE: bypassSubnets NOT passed here because the Java plugin code adds
-          // them AS routes (only those IPs go through VPN), not as bypass.
-          // We rely on V2Ray config routing (direct outbound for SSH host) instead.
           await _vpnService.startV2Ray(
-            remark: url.startsWith('ssh://')
+            remark: isSsh
                 ? 'WaledNet_SSH'
                 : 'WaledNet_VPN',
             config: jsonEncode(_config),
           );
           print('[_connectToVpn] V2Ray start call sent successfully.');
 
-          // Auto-disconnect if stuck on CONNECTING for 20s
-          Future.delayed(const Duration(seconds: 20), () {
+          // Force CONNECTED after 5s if still CONNECTING (plugin event or log detection may not fire)
+          Future.delayed(const Duration(seconds: 5), () {
+            if (_vpnStatus == 'CONNECTING' && _isConnectingUserTrigger) {
+              print('[_connectToVpn] Force CONNECTED after 5s fallback');
+              _onStatusChanged(V2RayStatus(
+                duration: '00:00:00',
+                uploadSpeed: 0,
+                downloadSpeed: 0,
+                upload: 0,
+                download: 0,
+                state: 'CONNECTED',
+              ));
+            }
+          });
+
+          // Auto-disconnect if still stuck on CONNECTING for 20s
+          Future.delayed(const Duration(seconds: 20), () async {
             if (_vpnStatus == 'CONNECTING') {
               print('[_connectToVpn] TIMEOUT: stuck on CONNECTING for 20s, disconnecting...');
-              toggleVpn();
+              await _vpnService.stopV2Ray();
+              await SshTunnelService().stopTunnel();
+              _logTimer?.cancel();
+              _logTimer = null;
+              _vpnStatus = 'DISCONNECTED';
+              _status = null;
+              _isConnectingUserTrigger = false;
+              _updateButtonState();
+              notifyListeners();
             }
           });
 
@@ -645,11 +605,10 @@ class VpnProvider with ChangeNotifier {
                 print('--- [V2Ray Native Logs] ---');
                 for (var log in logs) {
                   print('[XrayCore] $log');
-                  // Detect Xray startup - force CONNECTED state
                   if (_isConnectingUserTrigger &&
                       log.contains('core: Xray') &&
                       log.contains('started')) {
-                    print('[_connectToVpn] Xray started detected in logs! Forcing CONNECTED state.');
+                    print('[_connectToVpn] Xray started detected! Setting CONNECTED state.');
                     _onStatusChanged(V2RayStatus(
                       duration: '00:00:00',
                       uploadSpeed: 0,
@@ -677,7 +636,7 @@ class VpnProvider with ChangeNotifier {
   }
 
   Future<void> toggleVpn() async {
-    if (_status?.state == 'CONNECTED' || _vpnStatus == 'CONNECTED') {
+    if (_status?.state == 'CONNECTED' || _vpnStatus == 'CONNECTED' || _vpnStatus == 'CONNECTING') {
       if (Platform.isWindows) {
         final originalUrl = _getFinalUrl();
         final url = await UrlParserService.resolveUrlHost(originalUrl);
@@ -695,6 +654,10 @@ class VpnProvider with ChangeNotifier {
         await SshTunnelService().stopTunnel();
         _logTimer?.cancel();
         _logTimer = null;
+        _vpnStatus = 'DISCONNECTED';
+        _status = null;
+        _isConnectingUserTrigger = false;
+        _updateButtonState();
       }
     } else {
       await _connectToVpn();

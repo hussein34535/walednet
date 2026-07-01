@@ -258,9 +258,11 @@ class UrlParserService {
   }
 
   /// Fetches the public IP through the SOCKS5 proxy (SSH tunnel).
-  /// Uses 1.1.1.1/cdn-cgi/trace (direct IP, no DNS resolution needed) instead of
-  /// api.ipify.org (requires DNS on SSH server which may fail/timeout).
   static Future<String?> fetchIpThroughProxy() async {
+    const host = 'checkip.amazonaws.com';
+    const hostPort = 80;
+    final hostBytes = utf8.encode(host);
+
     for (int port in [10808, 10809]) {
       try {
         final socket = await Socket.connect('127.0.0.1', port,
@@ -275,9 +277,11 @@ class UrlParserService {
             if (state == 0) {
               if (data.length >= 2 && data[0] == 0x05 && data[1] == 0x00) {
                 state = 1;
-                // Use 1.1.1.1 (IPv4, ATYP 0x01) — no DNS needed
+                // SOCKS5 CONNECT with domain name (ATYP 0x03) — SSH server does DNS
                 final req = BytesBuilder();
-                req.add([0x05, 0x01, 0x00, 0x01, 0x01, 0x01, 0x01, 0x01, 0x00, 0x50]);
+                req.add([0x05, 0x01, 0x00, 0x03, hostBytes.length]);
+                req.add(hostBytes);
+                req.add([hostPort >> 8, hostPort & 0xFF]);
                 socket.add(req.takeBytes());
               } else {
                 print('[fetchIpThroughProxy] Port $port: SOCKS5 greeting failed, unexpected response: $data');
@@ -287,7 +291,7 @@ class UrlParserService {
             } else if (state == 1) {
               if (data.length >= 2 && data[0] == 0x05 && data[1] == 0x00) {
                 state = 2;
-                socket.add(utf8.encode('GET /cdn-cgi/trace HTTP/1.1\r\nHost: 1.1.1.1\r\nConnection: close\r\n\r\n'));
+                socket.add(utf8.encode('GET / HTTP/1.1\r\nHost: $host\r\nConnection: close\r\n\r\n'));
               } else {
                 print('[fetchIpThroughProxy] Port $port: CONNECT response failed: $data');
                 completer.complete(null);
@@ -306,17 +310,21 @@ class UrlParserService {
             if (!completer.isCompleted) {
               try {
                 final httpResponse = utf8.decode(responseData.takeBytes());
-                // Parse "ip=..." from Cloudflare trace response
+                print('[fetchIpThroughProxy] Port $port: Raw response: $httpResponse');
+                String? ip;
                 for (final line in httpResponse.split('\n')) {
-                  if (line.startsWith('ip=')) {
-                    final ip = line.substring(3).trim();
-                    if (ip.isNotEmpty) {
-                      completer.complete(ip);
-                      return;
-                    }
+                  final trimmed = line.trim();
+                  if (trimmed.startsWith('ip=')) {
+                    ip = trimmed.substring(3).trim();
+                  } else if (RegExp(r'^\d+\.\d+\.\d+\.\d+$').hasMatch(trimmed)) {
+                    ip = trimmed;
+                  }
+                  if (ip != null) {
+                    completer.complete(ip);
+                    return;
                   }
                 }
-                print('[fetchIpThroughProxy] Port $port: No ip= line in response');
+                print('[fetchIpThroughProxy] Port $port: No IP found in response');
                 completer.complete(null);
               } catch (e) {
                 print('[fetchIpThroughProxy] Port $port: Parse error: $e');

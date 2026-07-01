@@ -30,6 +30,8 @@ class VpnService {
     required String config,
     List<String>? bypassSubnets,
     bool proxyOnly = false,
+    int sshLocalPort = -1,
+    List<String>? blockedApps,
   }) async {
     if (Platform.isAndroid || Platform.isIOS) {
       await _flutterV2ray?.startV2Ray(
@@ -37,6 +39,8 @@ class VpnService {
         config: config,
         bypassSubnets: bypassSubnets,
         proxyOnly: proxyOnly,
+        sshLocalPort: sshLocalPort,
+        blockedApps: blockedApps,
       );
     }
   }
