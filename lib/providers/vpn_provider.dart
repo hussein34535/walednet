@@ -138,6 +138,11 @@ class VpnProvider with ChangeNotifier {
         });
       }
     } else if (newState == 'DISCONNECTED') {
+      // Ignore stale DISCONNECTED broadcasts from previous process (cross-process delay)
+      if (previousState == 'CONNECTED') {
+        print('[_onStatusChanged] Ignoring DISCONNECTED while in CONNECTED state');
+        return;
+      }
       _isConnectionVerified = false;
       _isVerifyingConnection = false;
       _isConnectingUserTrigger = false;
@@ -445,6 +450,7 @@ class VpnProvider with ChangeNotifier {
     _logTimer = null;
 
     _isConnectingUserTrigger = true;
+    _vpnService.clearLogs();
     notifyListeners();
 
     final originalUrl = _getFinalUrl();
@@ -555,7 +561,12 @@ class VpnProvider with ChangeNotifier {
 
         print('[_connectToVpn] Initializing native V2Ray service via VpnService...');
         await _vpnService.initializeV2Ray();
-        
+
+        // Set CONNECTING before startV2Ray so fallback timer can fire if plugin stream is broken
+        _vpnStatus = 'CONNECTING';
+        _buttonText = 'جاري الاتصال...';
+        notifyListeners();
+
         try {
           print('[_connectToVpn] Starting V2Ray Core/VPN Tunnel. ProxyOnly = false');
           await _vpnService.startV2Ray(
@@ -568,7 +579,7 @@ class VpnProvider with ChangeNotifier {
 
           // Force CONNECTED after 5s if still CONNECTING (plugin event or log detection may not fire)
           Future.delayed(const Duration(seconds: 5), () {
-            if (_vpnStatus == 'CONNECTING' && _isConnectingUserTrigger) {
+            if (_vpnStatus == 'CONNECTING') {
               print('[_connectToVpn] Force CONNECTED after 5s fallback');
               _onStatusChanged(V2RayStatus(
                 duration: '00:00:00',
@@ -605,8 +616,7 @@ class VpnProvider with ChangeNotifier {
                 print('--- [V2Ray Native Logs] ---');
                 for (var log in logs) {
                   print('[XrayCore] $log');
-                  if (_isConnectingUserTrigger &&
-                      log.contains('core: Xray') &&
+                  if (log.contains('core: Xray') &&
                       log.contains('started')) {
                     print('[_connectToVpn] Xray started detected! Setting CONNECTED state.');
                     _onStatusChanged(V2RayStatus(

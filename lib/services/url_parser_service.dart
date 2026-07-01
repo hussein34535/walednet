@@ -169,7 +169,7 @@ class UrlParserService {
             "protocol": "socks",
             "listen": "0.0.0.0",
             "port": 10808,
-            "settings": {"udp": true}
+            "settings": {"auth": "noauth", "udp": true}
           }
         ],
         "outbounds": [

@@ -74,4 +74,16 @@ class VpnService {
     }
     return [];
   }
+
+  Future<bool> clearLogs() async {
+    if (Platform.isAndroid || Platform.isIOS) {
+      try {
+        return await _flutterV2ray?.clearLogs() ?? true;
+      } catch (e) {
+        print('[VpnService] Error clearing logs: $e');
+        return false;
+      }
+    }
+    return true;
+  }
 }
