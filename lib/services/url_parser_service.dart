@@ -161,10 +161,7 @@ class UrlParserService {
       return {
         "log": {"loglevel": "warning"},
         "dns": {
-          "servers": [
-            "1.1.1.1",
-            "8.8.8.8"
-          ]
+          "servers": ["1.1.1.1", "8.8.8.8"]
         },
         "inbounds": [
           {
@@ -172,11 +169,7 @@ class UrlParserService {
             "protocol": "socks",
             "listen": "0.0.0.0",
             "port": 10808,
-            "settings": {"udp": true},
-            "sniffing": {
-              "enabled": true,
-              "destOverride": ["http", "tls"]
-            }
+            "settings": {"udp": true}
           }
         ],
         "outbounds": [
@@ -192,7 +185,7 @@ class UrlParserService {
           {"protocol": "freedom", "tag": "direct", "settings": {}}
         ],
         "routing": {
-          "domainStrategy": "IPIfNonMatch",
+          "domainStrategy": "AsIs",
           "rules": [
             {
               "type": "field",
@@ -203,6 +196,12 @@ class UrlParserService {
               "type": "field",
               "domain": [sshHost],
               "outboundTag": "direct"
+            },
+            {
+              "type": "field",
+              "port": 53,
+              "network": "udp",
+              "outboundTag": "direct"
             }
           ]
         }
@@ -211,16 +210,15 @@ class UrlParserService {
     // Windows: keeps original SOCKS inbound + tun2socks approach
     return {
       "log": {"loglevel": "warning"},
+      "dns": {
+        "servers": ["1.1.1.1", "8.8.8.8"]
+      },
       "inbounds": [
         {
           "port": 10808,
           "protocol": "socks",
           "listen": "0.0.0.0",
-          "settings": {"auth": "noauth", "udp": true},
-          "sniffing": {
-            "enabled": true,
-            "destOverride": ["http", "tls"]
-          }
+          "settings": {"auth": "noauth", "udp": true}
         }
       ],
       "outbounds": [
@@ -236,7 +234,7 @@ class UrlParserService {
         {"protocol": "freedom", "tag": "direct", "settings": {}}
       ],
       "routing": {
-        "domainStrategy": "IPIfNonMatch",
+        "domainStrategy": "AsIs",
         "rules": [
           {
             "type": "field",
@@ -246,6 +244,12 @@ class UrlParserService {
           {
             "type": "field",
             "domain": [sshHost],
+            "outboundTag": "direct"
+          },
+          {
+            "type": "field",
+            "port": 53,
+            "network": "udp",
             "outboundTag": "direct"
           }
         ]
@@ -276,6 +280,7 @@ class UrlParserService {
                 req.add([0x00, 0x50]); // Port 80
                 socket.add(req.takeBytes());
               } else {
+                print('[fetchIpThroughProxy] Port $port: SOCKS5 greeting failed, unexpected response: $data');
                 completer.complete(null);
                 socket.destroy();
               }
@@ -287,6 +292,7 @@ class UrlParserService {
                     'Connection: close\r\n\r\n';
                 socket.add(utf8.encode(httpRequest));
               } else {
+                print('[fetchIpThroughProxy] Port $port: CONNECT response failed: $data');
                 completer.complete(null);
                 socket.destroy();
               }
@@ -295,6 +301,7 @@ class UrlParserService {
             }
           },
           onError: (e) {
+            print('[fetchIpThroughProxy] Port $port: Stream error: $e');
             if (!completer.isCompleted) completer.complete(null);
             socket.destroy();
           },
@@ -308,9 +315,11 @@ class UrlParserService {
                   final json = jsonDecode(body);
                   completer.complete(json['ip']?.toString());
                 } else {
+                  print('[fetchIpThroughProxy] Port $port: No JSON body in HTTP response');
                   completer.complete(null);
                 }
-              } catch (_) {
+              } catch (e) {
+                print('[fetchIpThroughProxy] Port $port: Parse error: $e');
                 completer.complete(null);
               }
             }
@@ -320,12 +329,17 @@ class UrlParserService {
         
         socket.add([0x05, 0x01, 0x00]);
         
-        final ip = await completer.future.timeout(const Duration(seconds: 5), onTimeout: () => null);
+        final ip = await completer.future.timeout(const Duration(seconds: 5), onTimeout: () {
+          print('[fetchIpThroughProxy] Port $port: SOCKS5 request timed out (5s)');
+          return null;
+        });
         if (ip != null) {
           print('[fetchIpThroughProxy] Successfully fetched IP $ip via SOCKS port $port');
           return ip;
         }
-      } catch (_) {}
+      } catch (e) {
+        print('[fetchIpThroughProxy] Port $port: Connection failed: $e');
+      }
     }
     return null;
   }

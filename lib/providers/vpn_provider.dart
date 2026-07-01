@@ -129,12 +129,73 @@ class VpnProvider with ChangeNotifier {
             if (ip != null) {
               print('[_onStatusChanged] VPN Public IP Address: {"ip":"$ip"}');
             } else {
-              final client = HttpClient()..connectionTimeout = const Duration(seconds: 4);
-              final request = await client.getUrl(Uri.parse('https://api.ipify.org?format=json'));
-              final response = await request.close();
-              if (response.statusCode == 200) {
-                final responseBody = await response.transform(utf8.decoder).join();
-                print('[_onStatusChanged] VPN Public IP Address (Direct Fallback): $responseBody');
+              print('[_onStatusChanged] fetchIpThroughProxy failed, trying direct fallback...');
+              // Try direct HTTPS through 10809 (SSH tunnel) to bypass DNS issues
+              try {
+                final socket = await Socket.connect('127.0.0.1', 10809,
+                    timeout: const Duration(seconds: 4));
+                final completer = Completer<String?>();
+                var state = 0;
+                final responseData = BytesBuilder();
+                socket.listen(
+                  (data) {
+                    if (state == 0) {
+                      if (data.length >= 2 && data[0] == 0x05 && data[1] == 0x00) {
+                        state = 1;
+                        final hostBytes = utf8.encode('api.ipify.org');
+                        final req = BytesBuilder();
+                        req.add([0x05, 0x01, 0x00, 0x03, hostBytes.length]);
+                        req.add(hostBytes);
+                        req.add([0x00, 0x50]);
+                        socket.add(req.takeBytes());
+                      } else {
+                        completer.complete(null);
+                        socket.destroy();
+                      }
+                    } else if (state == 1) {
+                      if (data.length >= 2 && data[0] == 0x05 && data[1] == 0x00) {
+                        state = 2;
+                        socket.add(utf8.encode('GET /?format=json HTTP/1.1\r\nHost: api.ipify.org\r\nConnection: close\r\n\r\n'));
+                      } else {
+                        completer.complete(null);
+                        socket.destroy();
+                      }
+                    } else if (state == 2) {
+                      responseData.add(data);
+                    }
+                  },
+                  onDone: () {
+                    if (!completer.isCompleted) {
+                      try {
+                        final httpResponse = utf8.decode(responseData.takeBytes());
+                        final bodyStart = httpResponse.indexOf('{');
+                        if (bodyStart != -1) {
+                          final body = httpResponse.substring(bodyStart);
+                          final json = jsonDecode(body);
+                          completer.complete(json['ip']?.toString());
+                        } else {
+                          completer.complete(null);
+                        }
+                      } catch (_) {
+                        completer.complete(null);
+                      }
+                    }
+                    socket.destroy();
+                  },
+                  onError: (e) {
+                    if (!completer.isCompleted) completer.complete(null);
+                    socket.destroy();
+                  },
+                );
+                socket.add([0x05, 0x01, 0x00]);
+                final fallbackIp = await completer.future.timeout(const Duration(seconds: 5), onTimeout: () => null);
+                if (fallbackIp != null) {
+                  print('[_onStatusChanged] VPN Public IP Address (Fallback): {"ip":"$fallbackIp"}');
+                } else {
+                  print('[_onStatusChanged] Fallback also failed - all proxy methods exhausted');
+                }
+              } catch (e) {
+                print('[_onStatusChanged] Fallback error: $e');
               }
             }
           } catch (e) {
@@ -231,12 +292,22 @@ class VpnProvider with ChangeNotifier {
 
       if (servers.isNotEmpty && profiles.isNotEmpty) {
         _vpnServers = [
+          ...servers,
           VpnServer(
             name: 'سيرفر تجربة SSH (SSL/TLS)',
             url: 'ssh://esdgsdgre4y643:sgdgsdg434@76.13.39.204:443?ssl=true',
             icon: 'assets/images/server.svg',
           ),
-          ...servers,
+          VpnServer(
+            name: 'سيرفر SSH 2 (root)',
+            url: 'ssh://root:%3FAM.81%23Hs-LjVfG%3B%27P0f@187.127.107.105:443?ssl=true',
+            icon: 'assets/images/server.svg',
+          ),
+          // VpnServer(
+          //   name: 'سيرفر SSH 2',
+          //   url: 'ssh://d:d@187.124.43.15:443?ssl=true',
+          //   icon: 'assets/images/server.svg',
+          // ),
         ];
         _sniProfiles = profiles;
         await _saveDataToCache();
@@ -377,10 +448,33 @@ class VpnProvider with ChangeNotifier {
           _config = jsonDecode(configString) as Map<String, dynamic>;
         }
       }
+      if (!url.startsWith('ssh://')) {
+        _config.remove('dns');
+      }
+      if (_selectedProfile != null && !url.startsWith('ssh://')) {
+        _setAllowInsecure(_config);
+      }
     } catch (e) {
       print("Error initializing V2Ray: $e");
     }
     notifyListeners();
+  }
+
+  void _setAllowInsecure(Map<String, dynamic> config) {
+    final outbounds = config['outbounds'] as List<dynamic>?;
+    if (outbounds == null) return;
+    for (final outbound in outbounds) {
+      final streamSettings = outbound['streamSettings'] as Map<String, dynamic>?;
+      if (streamSettings == null) continue;
+      final tlsSettings = streamSettings['tlsSettings'] as Map<String, dynamic>?;
+      if (tlsSettings != null) {
+        tlsSettings['allowInsecure'] = true;
+      }
+      final realitySettings = streamSettings['realitySettings'] as Map<String, dynamic>?;
+      if (realitySettings != null) {
+        realitySettings['allowInsecure'] = true;
+      }
+    }
   }
 
   String _getFinalUrl() {
@@ -520,21 +614,29 @@ class VpnProvider with ChangeNotifier {
           }
         }
 
-        final List<String>? bypassSubnets = await _getBypassSubnets(url);
-
         print('[_connectToVpn] Initializing native V2Ray service via VpnService...');
         await _vpnService.initializeV2Ray();
         
         try {
           print('[_connectToVpn] Starting V2Ray Core/VPN Tunnel. ProxyOnly = false');
+          // NOTE: bypassSubnets NOT passed here because the Java plugin code adds
+          // them AS routes (only those IPs go through VPN), not as bypass.
+          // We rely on V2Ray config routing (direct outbound for SSH host) instead.
           await _vpnService.startV2Ray(
             remark: url.startsWith('ssh://')
                 ? 'WaledNet_SSH'
                 : 'WaledNet_VPN',
             config: jsonEncode(_config),
-            bypassSubnets: bypassSubnets,
           );
           print('[_connectToVpn] V2Ray start call sent successfully.');
+
+          // Auto-disconnect if stuck on CONNECTING for 20s
+          Future.delayed(const Duration(seconds: 20), () {
+            if (_vpnStatus == 'CONNECTING') {
+              print('[_connectToVpn] TIMEOUT: stuck on CONNECTING for 20s, disconnecting...');
+              toggleVpn();
+            }
+          });
 
           _logTimer?.cancel();
           _logTimer = Timer.periodic(const Duration(seconds: 2), (timer) async {
@@ -544,6 +646,20 @@ class VpnProvider with ChangeNotifier {
                 print('--- [V2Ray Native Logs] ---');
                 for (var log in logs) {
                   print('[XrayCore] $log');
+                  // Detect Xray startup - force CONNECTED state
+                  if (_isConnectingUserTrigger &&
+                      log.contains('core: Xray') &&
+                      log.contains('started')) {
+                    print('[_connectToVpn] Xray started detected in logs! Forcing CONNECTED state.');
+                    _onStatusChanged(V2RayStatus(
+                      duration: '00:00:00',
+                      uploadSpeed: 0,
+                      downloadSpeed: 0,
+                      upload: 0,
+                      download: 0,
+                      state: 'CONNECTED',
+                    ));
+                  }
                 }
                 print('---------------------------');
               }
