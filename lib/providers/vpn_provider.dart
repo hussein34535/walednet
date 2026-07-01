@@ -130,7 +130,7 @@ class VpnProvider with ChangeNotifier {
               print('[_onStatusChanged] VPN Public IP Address: {"ip":"$ip"}');
             } else {
               print('[_onStatusChanged] fetchIpThroughProxy failed, trying direct fallback...');
-              // Try direct HTTPS through 10809 (SSH tunnel) to bypass DNS issues
+              // Try direct HTTP through 10809 (SSH tunnel) — uses 1.1.1.1 IP directly, no DNS
               try {
                 final socket = await Socket.connect('127.0.0.1', 10809,
                     timeout: const Duration(seconds: 4));
@@ -142,11 +142,8 @@ class VpnProvider with ChangeNotifier {
                     if (state == 0) {
                       if (data.length >= 2 && data[0] == 0x05 && data[1] == 0x00) {
                         state = 1;
-                        final hostBytes = utf8.encode('api.ipify.org');
                         final req = BytesBuilder();
-                        req.add([0x05, 0x01, 0x00, 0x03, hostBytes.length]);
-                        req.add(hostBytes);
-                        req.add([0x00, 0x50]);
+                        req.add([0x05, 0x01, 0x00, 0x01, 0x01, 0x01, 0x01, 0x01, 0x00, 0x50]);
                         socket.add(req.takeBytes());
                       } else {
                         completer.complete(null);
@@ -155,7 +152,7 @@ class VpnProvider with ChangeNotifier {
                     } else if (state == 1) {
                       if (data.length >= 2 && data[0] == 0x05 && data[1] == 0x00) {
                         state = 2;
-                        socket.add(utf8.encode('GET /?format=json HTTP/1.1\r\nHost: api.ipify.org\r\nConnection: close\r\n\r\n'));
+                        socket.add(utf8.encode('GET /cdn-cgi/trace HTTP/1.1\r\nHost: 1.1.1.1\r\nConnection: close\r\n\r\n'));
                       } else {
                         completer.complete(null);
                         socket.destroy();
@@ -168,14 +165,16 @@ class VpnProvider with ChangeNotifier {
                     if (!completer.isCompleted) {
                       try {
                         final httpResponse = utf8.decode(responseData.takeBytes());
-                        final bodyStart = httpResponse.indexOf('{');
-                        if (bodyStart != -1) {
-                          final body = httpResponse.substring(bodyStart);
-                          final json = jsonDecode(body);
-                          completer.complete(json['ip']?.toString());
-                        } else {
-                          completer.complete(null);
+                        for (final line in httpResponse.split('\n')) {
+                          if (line.startsWith('ip=')) {
+                            final ip = line.substring(3).trim();
+                            if (ip.isNotEmpty) {
+                              completer.complete(ip);
+                              return;
+                            }
+                          }
                         }
+                        completer.complete(null);
                       } catch (_) {
                         completer.complete(null);
                       }

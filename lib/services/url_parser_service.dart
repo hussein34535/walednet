@@ -257,7 +257,9 @@ class UrlParserService {
     };
   }
 
-  /// جلب الـ IP من خلال البروكسي المحلي للـ VPN/SSH لتأكيد تغيير الـ IP
+  /// Fetches the public IP through the SOCKS5 proxy (SSH tunnel).
+  /// Uses 1.1.1.1/cdn-cgi/trace (direct IP, no DNS resolution needed) instead of
+  /// api.ipify.org (requires DNS on SSH server which may fail/timeout).
   static Future<String?> fetchIpThroughProxy() async {
     for (int port in [10808, 10809]) {
       try {
@@ -265,7 +267,7 @@ class UrlParserService {
             timeout: const Duration(seconds: 3));
         
         final completer = Completer<String?>();
-        var state = 0; // 0: greeting, 1: connect, 2: http response
+        var state = 0;
         final responseData = BytesBuilder();
         
         socket.listen(
@@ -273,11 +275,9 @@ class UrlParserService {
             if (state == 0) {
               if (data.length >= 2 && data[0] == 0x05 && data[1] == 0x00) {
                 state = 1;
-                final hostBytes = utf8.encode('api.ipify.org');
+                // Use 1.1.1.1 (IPv4, ATYP 0x01) — no DNS needed
                 final req = BytesBuilder();
-                req.add([0x05, 0x01, 0x00, 0x03, hostBytes.length]);
-                req.add(hostBytes);
-                req.add([0x00, 0x50]); // Port 80
+                req.add([0x05, 0x01, 0x00, 0x01, 0x01, 0x01, 0x01, 0x01, 0x00, 0x50]);
                 socket.add(req.takeBytes());
               } else {
                 print('[fetchIpThroughProxy] Port $port: SOCKS5 greeting failed, unexpected response: $data');
@@ -287,10 +287,7 @@ class UrlParserService {
             } else if (state == 1) {
               if (data.length >= 2 && data[0] == 0x05 && data[1] == 0x00) {
                 state = 2;
-                final httpRequest = 'GET /?format=json HTTP/1.1\r\n'
-                    'Host: api.ipify.org\r\n'
-                    'Connection: close\r\n\r\n';
-                socket.add(utf8.encode(httpRequest));
+                socket.add(utf8.encode('GET /cdn-cgi/trace HTTP/1.1\r\nHost: 1.1.1.1\r\nConnection: close\r\n\r\n'));
               } else {
                 print('[fetchIpThroughProxy] Port $port: CONNECT response failed: $data');
                 completer.complete(null);
@@ -309,15 +306,18 @@ class UrlParserService {
             if (!completer.isCompleted) {
               try {
                 final httpResponse = utf8.decode(responseData.takeBytes());
-                final bodyStart = httpResponse.indexOf('{');
-                if (bodyStart != -1) {
-                  final body = httpResponse.substring(bodyStart);
-                  final json = jsonDecode(body);
-                  completer.complete(json['ip']?.toString());
-                } else {
-                  print('[fetchIpThroughProxy] Port $port: No JSON body in HTTP response');
-                  completer.complete(null);
+                // Parse "ip=..." from Cloudflare trace response
+                for (final line in httpResponse.split('\n')) {
+                  if (line.startsWith('ip=')) {
+                    final ip = line.substring(3).trim();
+                    if (ip.isNotEmpty) {
+                      completer.complete(ip);
+                      return;
+                    }
+                  }
                 }
+                print('[fetchIpThroughProxy] Port $port: No ip= line in response');
+                completer.complete(null);
               } catch (e) {
                 print('[fetchIpThroughProxy] Port $port: Parse error: $e');
                 completer.complete(null);

@@ -141,36 +141,45 @@ class SshTunnelService {
 
   void _handleSocksClient(Socket client) {
     if (_isClosed) {
+      print('[SOCKS-Handler] Rejected: tunnel closed');
       client.destroy();
       return;
     }
 
+    print('[SOCKS-Handler] New client connected from ${client.remoteAddress.address}:${client.remotePort}');
     final buffer = <int>[];
     SSHForwardChannel? remote;
     StreamSubscription<Uint8List>? remoteSub;
     StreamSubscription<List<int>>? clientSub;
     var state = 0; // 0=greeting, 1=request, 2=streaming
+    var bytesReceived = 0;
 
     clientSub = client.listen(
       (data) {
+        bytesReceived += data.length;
         buffer.addAll(data);
+        print('[SOCKS-Handler] State=$state, received ${data.length}B (total=$bytesReceived, buffer=${buffer.length}B)');
         if (state == 0) {
           if (buffer.length < 2) return;
           final ver = buffer[0];
           final nmethods = buffer[1];
           if (buffer.length < 2 + nmethods) return;
+          print('[SOCKS-Handler] Greeting: ver=$ver, nmethods=$nmethods');
           if (ver != 0x05) {
+            print('[SOCKS-Handler] Reject: bad version $ver');
             client.add([0x05, 0xFF]);
             client.destroy();
             return;
           }
           if (!buffer.sublist(2, 2 + nmethods).contains(0x00)) {
+            print('[SOCKS-Handler] Reject: no auth method 0x00');
             client.add([0x05, 0xFF]);
             client.destroy();
             return;
           }
           buffer.removeRange(0, 2 + nmethods);
           client.add([0x05, 0x00]);
+          print('[SOCKS-Handler] Sent greeting response, state -> 1');
           state = 1;
         }
         if (state == 1) {
@@ -178,7 +187,9 @@ class SshTunnelService {
           final ver = buffer[0];
           final cmd = buffer[1];
           final atyp = buffer[3];
+          print('[SOCKS-Handler] Request: ver=$ver, cmd=$cmd, atyp=$atyp');
           if (ver != 0x05 || cmd != 0x01) {
+            print('[SOCKS-Handler] Reject: ver=$ver cmd=$cmd (expected 5,1)');
             _sendSocksReply(client, 0x07);
             client.destroy();
             return;
@@ -204,51 +215,68 @@ class SshTunnelService {
               if (i < 19) host += ':';
             }
           } else {
+            print('[SOCKS-Handler] Reject: unknown atyp=$atyp');
             _sendSocksReply(client, 0x08);
             client.destroy();
             return;
           }
           final port = (buffer[headerLen - 2] << 8) | buffer[headerLen - 1];
           buffer.removeRange(0, headerLen);
+          print('[SOCKS-Handler] CONNECT $host:$port');
 
           if (_sshClient == null) {
+            print('[SOCKS-Handler] Reject: no ssh client');
             _sendSocksReply(client, 0x05);
             client.destroy();
             return;
           }
 
+          print('[SOCKS-Handler] Calling forwardLocal($host, $port)...');
           _sshClient!.forwardLocal(host, port).then((ch) {
+            print('[SOCKS-Handler] forwardLocal SUCCESS for $host:$port');
             remote = ch;
             _sendSocksReply(client, 0x00);
             state = 2;
 
             remoteSub = ch.stream.listen(
               (remoteData) {
+                print('[SOCKS-Handler] Forwarding ${remoteData.length}B from $host:$port to client');
                 client.add(remoteData);
               },
-              onDone: () => client.destroy(),
-              onError: (_, __) => client.destroy(),
+              onDone: () {
+                print('[SOCKS-Handler] remote stream done for $host:$port');
+                client.destroy();
+              },
+              onError: (e, st) {
+                print('[SOCKS-Handler] remote stream error for $host:$port: $e');
+                client.destroy();
+              },
             );
 
             if (buffer.isNotEmpty) {
+              print('[SOCKS-Handler] Forwarding ${buffer.length}B buffered data');
               ch.sink.add(buffer.toList());
               buffer.clear();
             }
-          }).catchError((_) {
+          }).catchError((e) {
+            print('[SOCKS-Handler] forwardLocal FAILED for $host:$port: $e');
             _sendSocksReply(client, 0x04);
             client.destroy();
           });
         }
         if (state == 2) {
+          print('[SOCKS-Handler] Forwarding ${buffer.length}B from client to remote');
           remote?.sink.add(buffer.toList());
           buffer.clear();
         }
       },
       onDone: () {
+        print('[SOCKS-Handler] Client socket closed (state=$state)');
         remoteSub?.cancel();
         remote?.destroy();
       },
-      onError: (_, __) {
+      onError: (e, st) {
+        print('[SOCKS-Handler] Client socket error (state=$state): $e');
         remoteSub?.cancel();
         remote?.destroy();
       },
