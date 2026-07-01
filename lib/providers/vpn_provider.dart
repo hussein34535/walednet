@@ -49,6 +49,7 @@ class VpnProvider with ChangeNotifier {
   bool _isConnectionVerified = false;
   bool _isConnectingUserTrigger = false;
   bool _hasPrintedIp = false;
+  bool _disposed = false;
 
   // Getters
   V2RayStatus? get status => _status;
@@ -91,6 +92,13 @@ class VpnProvider with ChangeNotifier {
         _connectToVpn();
       },
     );
+  }
+
+  @override
+  void notifyListeners() {
+    if (!_disposed) {
+      super.notifyListeners();
+    }
   }
 
   void _onStatusChanged(V2RayStatus newStatus) {
@@ -380,6 +388,28 @@ class VpnProvider with ChangeNotifier {
     return UrlParserService.getFinalUrlForServer(_selectedServer!, _selectedProfile);
   }
 
+  Future<List<String>?> _getBypassSubnets(String url) async {
+    if (!url.startsWith('ssh://')) return null;
+    final sshParams = UrlParserService.parseSshUrl(url);
+    final String sshHost = sshParams?['host'] ?? '';
+    if (sshHost.isEmpty) return null;
+
+    try {
+      final isIp = InternetAddress.tryParse(sshHost) != null;
+      if (isIp) {
+        print('[_getBypassSubnets] Bypassing SSH host IP: $sshHost');
+        return ["$sshHost/32"];
+      } else {
+        final resolvedIp = await UrlParserService.resolveDomain(sshHost);
+        print('[_getBypassSubnets] Resolved SSH host $sshHost to $resolvedIp for bypass');
+        return ["$resolvedIp/32"];
+      }
+    } catch (e) {
+      print('[_getBypassSubnets] Error resolving SSH host for bypass: $e');
+    }
+    return null;
+  }
+
   Future<void> _connectToVpn() async {
     _isConnectingUserTrigger = true;
     notifyListeners();
@@ -431,23 +461,7 @@ class VpnProvider with ChangeNotifier {
           }
         }
 
-        List<String>? bypassSubnets;
-        if (url.startsWith('ssh://')) {
-          final sshParams = UrlParserService.parseSshUrl(url);
-          final String sshHost = sshParams?['host'] ?? '';
-          if (sshHost.isNotEmpty) {
-            try {
-              final isIp = InternetAddress.tryParse(sshHost) != null;
-              if (isIp) {
-                bypassSubnets = null;
-              } else {
-                bypassSubnets = null;
-              }
-            } catch (e) {
-              bypassSubnets = null;
-            }
-          }
-        }
+        final List<String>? bypassSubnets = await _getBypassSubnets(url);
 
         await _vpnService.initializeV2Ray();
         try {
@@ -506,23 +520,7 @@ class VpnProvider with ChangeNotifier {
           }
         }
 
-        List<String>? bypassSubnets;
-        if (url.startsWith('ssh://')) {
-          final sshParams = UrlParserService.parseSshUrl(url);
-          final String sshHost = sshParams?['host'] ?? '';
-          if (sshHost.isNotEmpty) {
-            try {
-              final isIp = InternetAddress.tryParse(sshHost) != null;
-              if (isIp) {
-                bypassSubnets = null;
-              } else {
-                bypassSubnets = null;
-              }
-            } catch (e) {
-              bypassSubnets = null;
-            }
-          }
-        }
+        final List<String>? bypassSubnets = await _getBypassSubnets(url);
 
         print('[_connectToVpn] Initializing native V2Ray service via VpnService...');
         await _vpnService.initializeV2Ray();
@@ -697,8 +695,10 @@ class VpnProvider with ChangeNotifier {
 
   @override
   void dispose() {
+    _disposed = true;
     _timer?.cancel();
     _adLoadTimer?.cancel();
+    _logTimer?.cancel();
     super.dispose();
   }
 }
