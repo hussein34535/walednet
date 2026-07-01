@@ -1,12 +1,12 @@
 import 'dart:io';
-import 'package:flutter_v2ray/flutter_v2ray.dart';
+import 'package:flutter_v2ray_client/flutter_v2ray.dart';
 
 class VpnService {
-  late final FlutterV2ray? _flutterV2ray;
+  late final V2ray? _flutterV2ray;
 
   VpnService({required void Function(V2RayStatus) onStatusChanged}) {
     if (Platform.isAndroid || Platform.isIOS) {
-      _flutterV2ray = FlutterV2ray(onStatusChanged: onStatusChanged);
+      _flutterV2ray = V2ray(onStatusChanged: onStatusChanged);
     } else {
       _flutterV2ray = null;
     }
@@ -14,7 +14,7 @@ class VpnService {
 
   Future<void> initializeV2Ray() async {
     if (Platform.isAndroid || Platform.isIOS) {
-      await _flutterV2ray?.initializeV2Ray();
+      await _flutterV2ray?.initialize();
     }
   }
 
@@ -29,12 +29,14 @@ class VpnService {
     required String remark,
     required String config,
     List<String>? bypassSubnets,
+    bool proxyOnly = false,
   }) async {
     if (Platform.isAndroid || Platform.isIOS) {
       await _flutterV2ray?.startV2Ray(
         remark: remark,
         config: config,
         bypassSubnets: bypassSubnets,
+        proxyOnly: proxyOnly,
       );
     }
   }
@@ -55,5 +57,17 @@ class VpnService {
       }
     }
     return -1;
+  }
+
+  Future<List<String>> getLogs() async {
+    if (Platform.isAndroid || Platform.isIOS) {
+      try {
+        return await _flutterV2ray?.getLogs() ?? [];
+      } catch (e) {
+        print('[VpnService] Error getting logs: $e');
+        return [];
+      }
+    }
+    return [];
   }
 }

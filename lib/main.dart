@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:WaledNet/theme_provider.dart';
+import 'package:WaledNet/providers/vpn_provider.dart';
 import 'package:WaledNet/screens/update_check_page.dart';
 
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
@@ -21,8 +22,11 @@ void main() async {
   }
 
   runApp(
-    ChangeNotifierProvider(
-      create: (context) => ThemeProvider(),
+    MultiProvider(
+      providers: [
+        ChangeNotifierProvider(create: (context) => ThemeProvider()),
+        ChangeNotifierProvider(create: (context) => VpnProvider()..initProvider()),
+      ],
       child: const VpnApp(),
     ),
   );

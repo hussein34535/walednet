@@ -27,14 +27,7 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
-        <service
-            android:name="dev.devs.flutter_v2ray.V2RayVpnService"
-            android:exported="true"
-            android:permission="android.permission.BIND_VPN_SERVICE">
-            <intent-filter>
-                <action android:name="android.net.VpnService"/>
-            </intent-filter>
-        </service>
+
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data
