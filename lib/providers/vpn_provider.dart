@@ -421,25 +421,35 @@ class VpnProvider with ChangeNotifier {
   }
 
   Future<List<String>?> _getBypassSubnets(String url) async {
-    if (!url.startsWith('ssh://')) return null;
-    final sshParams = UrlParserService.parseSshUrl(url);
-    final String sshHost = sshParams?['host'] ?? '';
-    if (sshHost.isEmpty) return null;
+    final List<String> bypass = [
+      "127.0.0.0/8",
+      "10.0.0.0/8",
+      "172.16.0.0/12",
+      "192.168.0.0/16",
+    ];
 
-    try {
-      final isIp = InternetAddress.tryParse(sshHost) != null;
-      if (isIp) {
-        print('[_getBypassSubnets] Bypassing SSH host IP: $sshHost');
-        return ["$sshHost/32"];
-      } else {
-        final resolvedIp = await UrlParserService.resolveDomain(sshHost);
-        print('[_getBypassSubnets] Resolved SSH host $sshHost to $resolvedIp for bypass');
-        return ["$resolvedIp/32"];
+    if (url.startsWith('ssh://')) {
+      final sshParams = UrlParserService.parseSshUrl(url);
+      final String sshHost = sshParams?['host'] ?? '';
+      if (sshHost.isNotEmpty) {
+        try {
+          final isIp = InternetAddress.tryParse(sshHost) != null;
+          String sshIp;
+          if (isIp) {
+            sshIp = sshHost;
+          } else {
+            sshIp = await UrlParserService.resolveDomain(sshHost);
+          }
+          bypass.add("$sshIp/32");
+          print('[_getBypassSubnets] Added SSH host: $sshIp/32');
+        } catch (e) {
+          print('[_getBypassSubnets] Error resolving SSH host: $e');
+        }
       }
-    } catch (e) {
-      print('[_getBypassSubnets] Error resolving SSH host for bypass: $e');
     }
-    return null;
+
+    print('[_getBypassSubnets] Final list: $bypass');
+    return bypass;
   }
 
   Future<void> _connectToVpn() async {
@@ -608,6 +618,14 @@ class VpnProvider with ChangeNotifier {
             }
           });
 
+          // Test traffic routing 5s after V2Ray start
+          Future.delayed(const Duration(seconds: 5), () {
+            if (_vpnStatus == 'CONNECTED') {
+              print('[_connectToVpn] VPN Connected. Testing traffic routing...');
+              _testTrafficRouting();
+            }
+          });
+
           _logTimer?.cancel();
           _logTimer = Timer.periodic(const Duration(seconds: 2), (timer) async {
             try {
@@ -690,6 +708,32 @@ class VpnProvider with ChangeNotifier {
 
   void stopTimer() {
     _timer?.cancel();
+  }
+
+  Future<void> _testTrafficRouting() async {
+    print('[_testTrafficRouting] Testing if traffic routes through VPN...');
+
+    try {
+      final ip = await UrlParserService.fetchIpThroughProxy();
+      if (ip != null) {
+        print('[_testTrafficRouting] SOCKS5 direct: IP = $ip');
+      } else {
+        print('[_testTrafficRouting] SOCKS5 direct failed');
+      }
+    } catch (e) {
+      print('[_testTrafficRouting] SOCKS5 direct error: $e');
+    }
+
+    try {
+      final client = HttpClient();
+      client.connectionTimeout = const Duration(seconds: 10);
+      final request = await client.getUrl(Uri.parse('https://api.ipify.org?format=json'));
+      final response = await request.close();
+      final body = await response.transform(utf8.decoder).join();
+      print('[_testTrafficRouting] HTTP direct (simulating browser): $body');
+    } catch (e) {
+      print('[_testTrafficRouting] HTTP direct failed: $e');
+    }
   }
 
   Future<void> runSpeedTest() async {
