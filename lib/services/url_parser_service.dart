@@ -161,7 +161,11 @@ class UrlParserService {
       return {
         "log": {"loglevel": "warning"},
         "dns": {
-          "servers": ["1.1.1.1", "8.8.8.8"]
+          "servers": [
+            "https://1.1.1.1/dns-query",
+            "https://8.8.8.8/dns-query"
+          ],
+          "queryStrategy": "UseIP"
         },
         "inbounds": [
           {
@@ -182,11 +186,17 @@ class UrlParserService {
               ]
             }
           },
-          {"protocol": "freedom", "tag": "direct", "settings": {}}
+          {"protocol": "freedom", "tag": "direct", "settings": {}},
+          {"protocol": "blackhole", "tag": "block", "settings": {}}
         ],
         "routing": {
           "domainStrategy": "AsIs",
           "rules": [
+            {
+              "type": "field",
+              "ip": ["127.0.0.0/8", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"],
+              "outboundTag": "direct"
+            },
             {
               "type": "field",
               "ip": [sshHost],
@@ -201,6 +211,11 @@ class UrlParserService {
               "type": "field",
               "port": 53,
               "network": "udp",
+              "outboundTag": "block"
+            },
+            {
+              "type": "field",
+              "network": "udp",
               "outboundTag": "direct"
             }
           ]
@@ -211,7 +226,8 @@ class UrlParserService {
     return {
       "log": {"loglevel": "warning"},
       "dns": {
-        "servers": ["1.1.1.1", "8.8.8.8"]
+        "servers": ["https://1.1.1.1/dns-query", "https://8.8.8.8/dns-query"],
+        "queryStrategy": "UseIP"
       },
       "inbounds": [
         {
@@ -231,11 +247,17 @@ class UrlParserService {
             ]
           }
         },
-        {"protocol": "freedom", "tag": "direct", "settings": {}}
+        {"protocol": "freedom", "tag": "direct", "settings": {}},
+        {"protocol": "blackhole", "tag": "block", "settings": {}}
       ],
       "routing": {
         "domainStrategy": "AsIs",
         "rules": [
+          {
+            "type": "field",
+            "ip": ["127.0.0.0/8", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"],
+            "outboundTag": "direct"
+          },
           {
             "type": "field",
             "ip": [sshHost],
@@ -249,6 +271,11 @@ class UrlParserService {
           {
             "type": "field",
             "port": 53,
+            "network": "udp",
+            "outboundTag": "block"
+          },
+          {
+            "type": "field",
             "network": "udp",
             "outboundTag": "direct"
           }
