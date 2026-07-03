@@ -7,9 +7,11 @@ import android.content.Intent
 import android.net.VpnService
 import android.os.Build
 import android.os.ParcelFileDescriptor
+import android.system.ErrnoException
+import android.system.Os
+import android.system.OsConstants
 import android.util.Log
-import java.io.FileInputStream
-import java.io.FileOutputStream
+import java.io.FileDescriptor
 import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.InetAddress
@@ -28,8 +30,7 @@ class WaledVpnService : VpnService() {
 
     private val TAG = "WaledVpn"
     private var tunFd: ParcelFileDescriptor? = null
-    private var tunInput: FileInputStream? = null
-    private var tunOutput: FileOutputStream? = null
+    private var tunDesc: FileDescriptor? = null
     @Volatile private var running = false
     private var socksPort = 10808
     private val sessions = ConcurrentHashMap<Int, TcpSession>()
@@ -46,6 +47,7 @@ class WaledVpnService : VpnService() {
     }
 
     override fun onRevoke() {
+        Log.w(TAG, "onRevoke called by system")
         stopVpn()
     }
 
@@ -70,8 +72,8 @@ class WaledVpnService : VpnService() {
         }
         if (tunFd == null) { Log.e(TAG, "TUN fd is null"); stopVpn(); return }
 
-        tunInput = FileInputStream(tunFd!!.fileDescriptor)
-        tunOutput = FileOutputStream(tunFd!!.fileDescriptor)
+        tunDesc = tunFd!!.fileDescriptor
+        Log.i(TAG, "TUN fd ready fd=${tunFd!!.getFd()}")
 
         createChannel()
         startForeground(1, buildNotif())
@@ -86,11 +88,24 @@ class WaledVpnService : VpnService() {
         var total = 0L
         while (running) {
             try {
-                val n = tunInput!!.read(buf)
-                if (n <= 0) break
-                total += n
-                processPacket(buf.copyOfRange(0, n))
-            } catch (_: Exception) { break }
+                val n = Os.read(tunDesc!!, buf, 0, buf.size)
+                if (n > 0) {
+                    total += n
+                    processPacket(buf.copyOfRange(0, n))
+                } else {
+                    Thread.sleep(10)
+                }
+            } catch (e: android.system.ErrnoException) {
+                if (e.errno == android.system.OsConstants.EAGAIN) {
+                    Thread.sleep(10)
+                    continue
+                }
+                Log.e(TAG, "TUN read error: errno=${e.errno} ${e.message}")
+                break
+            } catch (e: Exception) {
+                Log.e(TAG, "TUN read error: ${e.message}")
+                break
+            }
         }
         Log.i(TAG, "TUN reader stopped, total bytes read: $total")
         cleanup()
@@ -371,8 +386,10 @@ class WaledVpnService : VpnService() {
     private fun writeTun(data: ByteArray) {
         if (!running) return
         try {
-            synchronized(tunOutput!!) { tunOutput!!.write(data); tunOutput!!.flush() }
-        } catch (_: Exception) {}
+            synchronized(tunDesc!!) { Os.write(tunDesc!!, data, 0, data.size) }
+        } catch (e: Exception) {
+            Log.w(TAG, "TUN write error: ${e.message}")
+        }
     }
 
     private fun ipCsum(d: ByteArray, off: Int, len: Int): Int {
@@ -449,9 +466,7 @@ class WaledVpnService : VpnService() {
         Log.i(TAG, "Cleanup: closing ${sessions.size} sessions")
         sessions.values.forEach { it.close() }
         sessions.clear()
-        try { tunInput?.close() } catch (_: Exception) {}
-        try { tunOutput?.close() } catch (_: Exception) {}
         try { tunFd?.close() } catch (_: Exception) {}
-        tunInput = null; tunOutput = null; tunFd = null
+        tunDesc = null; tunFd = null
     }
 }
