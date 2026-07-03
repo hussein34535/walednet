@@ -285,12 +285,12 @@ class UrlParserService {
   }
 
   /// Fetches the public IP through the SOCKS5 proxy (SSH tunnel).
-  static Future<String?> fetchIpThroughProxy() async {
+  static Future<String?> fetchIpThroughProxy({List<int> ports = const [10808, 10809, 10807]}) async {
     const host = 'checkip.amazonaws.com';
     const hostPort = 80;
     final hostBytes = utf8.encode(host);
 
-    for (int port in [10808, 10809]) {
+    for (int port in ports) {
       try {
         final socket = await Socket.connect('127.0.0.1', port,
             timeout: const Duration(seconds: 3));

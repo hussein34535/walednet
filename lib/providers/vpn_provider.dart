@@ -49,6 +49,8 @@ class VpnProvider with ChangeNotifier {
   bool _isConnectionVerified = false;
   bool _isConnectingUserTrigger = false;
   bool _hasPrintedIp = false;
+  bool _customTunnelStarted = false;
+  int _socksPort = 10808;
   bool _disposed = false;
 
   // Getters
@@ -119,6 +121,11 @@ class VpnProvider with ChangeNotifier {
 
       if (previousState != 'CONNECTED') {
         startTimer();
+        if (!_customTunnelStarted && Platform.isAndroid) {
+          _customTunnelStarted = true;
+          _vpnService.startCustomTunnel(socksPort: _socksPort);
+          print('[_onStatusChanged] Started custom VPN tunnel on SOCKS port $_socksPort');
+        }
       }
 
       if (!_hasPrintedIp) {
@@ -148,6 +155,7 @@ class VpnProvider with ChangeNotifier {
       _isConnectingUserTrigger = false;
       _isAdLoading = false;
       _hasPrintedIp = false;
+      _customTunnelStarted = false;
       _logTimer?.cancel();
       _logTimer = null;
       stopTimer();
@@ -390,7 +398,7 @@ class VpnProvider with ChangeNotifier {
         _config.remove('dns');
       }
       if (_selectedProfile != null && !url.startsWith('ssh://')) {
-        _setAllowInsecure(_config);
+        _removeAllowInsecure(_config);
       }
     } catch (e) {
       print("Error initializing V2Ray: $e");
@@ -398,7 +406,7 @@ class VpnProvider with ChangeNotifier {
     notifyListeners();
   }
 
-  void _setAllowInsecure(Map<String, dynamic> config) {
+  void _removeAllowInsecure(Map<String, dynamic> config) {
     final outbounds = config['outbounds'] as List<dynamic>?;
     if (outbounds == null) return;
     for (final outbound in outbounds) {
@@ -406,11 +414,11 @@ class VpnProvider with ChangeNotifier {
       if (streamSettings == null) continue;
       final tlsSettings = streamSettings['tlsSettings'] as Map<String, dynamic>?;
       if (tlsSettings != null) {
-        tlsSettings['allowInsecure'] = true;
+        tlsSettings.remove('allowInsecure');
       }
       final realitySettings = streamSettings['realitySettings'] as Map<String, dynamic>?;
       if (realitySettings != null) {
-        realitySettings['allowInsecure'] = true;
+        realitySettings.remove('allowInsecure');
       }
     }
   }
@@ -450,6 +458,18 @@ class VpnProvider with ChangeNotifier {
 
     print('[_getBypassSubnets] Final list: $bypass');
     return bypass;
+  }
+
+  int _getSocksPort() {
+    final inbounds = _config['inbounds'] as List<dynamic>?;
+    if (inbounds != null) {
+      for (final inbound in inbounds) {
+        if (inbound is Map<String, dynamic> && inbound['protocol'] == 'socks') {
+          return inbound['port'] as int? ?? 10808;
+        }
+      }
+    }
+    return 10808;
   }
 
   Future<void> _connectToVpn() async {
@@ -578,12 +598,15 @@ class VpnProvider with ChangeNotifier {
         notifyListeners();
 
         try {
-          print('[_connectToVpn] Starting V2Ray Core/VPN Tunnel. ProxyOnly = false');
+          _socksPort = _getSocksPort();
+          print('[_connectToVpn] Starting V2Ray Core (proxyOnly=true). SOCKS port: $_socksPort');
           await _vpnService.startV2Ray(
             remark: isSsh
                 ? 'WaledNet_SSH'
                 : 'WaledNet_VPN',
             config: jsonEncode(_config),
+            proxyOnly: true,
+            sshLocalPort: isSsh ? 10809 : -1,
           );
           print('[_connectToVpn] V2Ray start call sent successfully.');
 
@@ -606,6 +629,7 @@ class VpnProvider with ChangeNotifier {
           Future.delayed(const Duration(seconds: 20), () async {
             if (_vpnStatus == 'CONNECTING') {
               print('[_connectToVpn] TIMEOUT: stuck on CONNECTING for 20s, disconnecting...');
+              await _vpnService.stopCustomTunnel();
               await _vpnService.stopV2Ray();
               await SshTunnelService().stopTunnel();
               _logTimer?.cancel();
@@ -613,6 +637,7 @@ class VpnProvider with ChangeNotifier {
               _vpnStatus = 'DISCONNECTED';
               _status = null;
               _isConnectingUserTrigger = false;
+              _customTunnelStarted = false;
               _updateButtonState();
               notifyListeners();
             }
@@ -678,6 +703,7 @@ class VpnProvider with ChangeNotifier {
         _status = null;
         _updateButtonState();
       } else {
+        await _vpnService.stopCustomTunnel();
         await _vpnService.stopV2Ray();
         await SshTunnelService().stopTunnel();
         _logTimer?.cancel();
@@ -685,6 +711,7 @@ class VpnProvider with ChangeNotifier {
         _vpnStatus = 'DISCONNECTED';
         _status = null;
         _isConnectingUserTrigger = false;
+        _customTunnelStarted = false;
         _updateButtonState();
       }
     } else {

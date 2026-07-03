@@ -1,8 +1,10 @@
 import 'dart:io';
+import 'package:flutter/services.dart';
 import 'package:flutter_v2ray_client/flutter_v2ray.dart';
 
 class VpnService {
   late final V2ray? _flutterV2ray;
+  static const _tunnelChannel = MethodChannel('com.waled.net/vpn_tunnel');
 
   VpnService({required void Function(V2RayStatus) onStatusChanged}) {
     if (Platform.isAndroid || Platform.isIOS) {
@@ -85,5 +87,27 @@ class VpnService {
       }
     }
     return true;
+  }
+
+  /// Start custom WaledVpnService TUN -> SOCKS5 bridge (Android only)
+  Future<bool> startCustomTunnel({int socksPort = 10808}) async {
+    if (!Platform.isAndroid) return false;
+    try {
+      await _tunnelChannel.invokeMethod('startTunnel', {'socksPort': socksPort});
+      return true;
+    } catch (e) {
+      print('[VpnService] Error starting custom tunnel: $e');
+      return false;
+    }
+  }
+
+  /// Stop custom WaledVpnService
+  Future<void> stopCustomTunnel() async {
+    if (!Platform.isAndroid) return;
+    try {
+      await _tunnelChannel.invokeMethod('stopTunnel');
+    } catch (e) {
+      print('[VpnService] Error stopping custom tunnel: $e');
+    }
   }
 }
