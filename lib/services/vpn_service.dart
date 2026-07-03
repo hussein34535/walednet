@@ -90,10 +90,14 @@ class VpnService {
   }
 
   /// Start custom WaledVpnService TUN -> SOCKS5 bridge (Android only)
-  Future<bool> startCustomTunnel({int socksPort = 10808}) async {
+  Future<bool> startCustomTunnel({int socksPort = 10808, String socksHost = '127.0.0.1', String dnsServer = '1.1.1.1'}) async {
     if (!Platform.isAndroid) return false;
     try {
-      await _tunnelChannel.invokeMethod('startTunnel', {'socksPort': socksPort});
+      await _tunnelChannel.invokeMethod('startTunnel', {
+        'socksPort': socksPort,
+        'socksHost': socksHost,
+        'dnsServer': dnsServer,
+      });
       return true;
     } catch (e) {
       print('[VpnService] Error starting custom tunnel: $e');

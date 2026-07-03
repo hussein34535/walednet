@@ -29,9 +29,13 @@ class MainActivity: FlutterActivity() {
             when (call.method) {
                 "startTunnel" -> {
                     val socksPort = call.argument<Int>("socksPort") ?: 10808
+                    val socksHost = call.argument<String>("socksHost") ?: "127.0.0.1"
+                    val dnsServer = call.argument<String>("dnsServer") ?: "1.1.1.1"
                     val intent = Intent(this, WaledVpnService::class.java).apply {
                         action = WaledVpnService.ACTION_START
                         putExtra(WaledVpnService.EXTRA_SOCKS_PORT, socksPort)
+                        putExtra(WaledVpnService.EXTRA_SOCKS_HOST, socksHost)
+                        putExtra(WaledVpnService.EXTRA_DNS_SERVER, dnsServer)
                     }
                     startService(intent)
                     result.success(true)

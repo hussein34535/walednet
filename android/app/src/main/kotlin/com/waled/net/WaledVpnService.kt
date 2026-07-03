@@ -18,23 +18,40 @@ import java.net.Socket
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.concurrent.thread
 
+/**
+ * WaledVpnService v6 - DNS-over-TCP
+ *
+ * v5 مشكلة: dartssh2 مبيعملش support UDP ASSOCIATE
+ * v6 حل: UDP DNS (53) → TCP DNS عبر SOCKS5 (RFC 1035)
+ *
+ * التوجيه:
+ *   TCP → SOCKS5 → SSH tunnel ✅
+ *   UDP 53 → DoT → SOCKS5 → SSH tunnel ✅  (جديد)
+ *   UDP أخرى → direct (protect)
+ */
 class WaledVpnService : VpnService() {
 
     companion object {
         const val ACTION_START = "com.waled.net.START"
         const val ACTION_STOP = "com.waled.net.STOP"
         const val EXTRA_SOCKS_PORT = "socks_port"
+        const val EXTRA_SOCKS_HOST = "socks_host"
+        const val EXTRA_DNS_SERVER = "dns_server"
 
         private const val TAG = "WaledVpn"
         private const val CHANNEL_ID = "waled_vpn"
-        private const val UDP_TIMEOUT_MS = 15000
+        private const val UDP_TIMEOUT_MS = 5000
+        private const val DNS_PORT = 53
+        private const val TCP_DNS_TIMEOUT_MS = 15000
     }
 
     private var tunFd: ParcelFileDescriptor? = null
     private var tunInput: FileInputStream? = null
     private var tunOutput: FileOutputStream? = null
     @Volatile private var running = false
+    private var socksHost = "127.0.0.1"
     private var socksPort = 10808
+    private var dnsServer = "1.1.1.1"
     private val sessions = ConcurrentHashMap<Int, TcpSession>()
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -50,7 +67,9 @@ class WaledVpnService : VpnService() {
 
         when (intent?.action) {
             ACTION_START -> {
+                socksHost = intent.getStringExtra(EXTRA_SOCKS_HOST) ?: "127.0.0.1"
                 socksPort = intent.getIntExtra(EXTRA_SOCKS_PORT, 10808)
+                dnsServer = intent.getStringExtra(EXTRA_DNS_SERVER) ?: "1.1.1.1"
                 startVpn()
             }
             ACTION_STOP -> stopVpn()
@@ -58,10 +77,7 @@ class WaledVpnService : VpnService() {
         return START_STICKY
     }
 
-    override fun onRevoke() {
-        Log.w(TAG, "onRevoke called by system")
-        stopVpn()
-    }
+    override fun onRevoke() { Log.w(TAG, "onRevoke called by system"); stopVpn() }
 
     private fun startVpn() {
         val builder = Builder()
@@ -70,22 +86,21 @@ class WaledVpnService : VpnService() {
         builder.addAddress("10.0.0.1", 24)
         builder.addRoute("0.0.0.0", 0)
         builder.addRoute("::", 0)
-        builder.addDnsServer("1.1.1.1")
+        builder.addDnsServer(dnsServer)
         builder.addDnsServer("8.8.8.8")
         builder.addDisallowedApplication(packageName)
 
         try {
             tunFd = builder.establish()
             if (tunFd == null) { Log.e(TAG, "TUN fd is null"); stopVpn(); return }
-            Log.i(TAG, "TUN established, fd=${tunFd!!.getFd()}")
+            Log.i(TAG, "TUN established, fd=${tunFd!!.fd}")
 
             tunInput = FileInputStream(tunFd!!.fileDescriptor)
             tunOutput = FileOutputStream(tunFd!!.fileDescriptor)
 
             running = true
-            Log.i(TAG, "VPN started, SOCKS: 127.0.0.1:$socksPort")
+            Log.i(TAG, "VPN started → $socksHost:$socksPort, DNS=$dnsServer (DoT)")
             thread(name = "TunRead") { readLoop() }
-
             startForeground(1, buildNotification("WaledNet VPN متصل"))
         } catch (e: Exception) {
             Log.e(TAG, "startVpn failed: ${e.message}")
@@ -101,18 +116,13 @@ class WaledVpnService : VpnService() {
             try {
                 val n = tunInput!!.read(buf)
                 if (n == 0) { Thread.sleep(10); continue }
-                if (n < 0) { Log.i(TAG, "TUN read returned $n (EOF)"); break }
+                if (n < 0) { Log.i(TAG, "TUN EOF"); break }
                 total += n
                 processPacket(buf.copyOfRange(0, n))
-            } catch (e: java.io.InterruptedIOException) {
-                if (!running) break
-            } catch (e: Exception) {
-                Log.w(TAG, "TUN read error: ${e.message}")
-                if (!running) break
-                Thread.sleep(10)
-            }
+            } catch (e: java.io.InterruptedIOException) { if (!running) break }
+            catch (e: Exception) { if (!running) break; Thread.sleep(10) }
         }
-        Log.i(TAG, "TUN reader stopped, total bytes read: $total")
+        Log.i(TAG, "TUN reader stopped, total: $total bytes")
         cleanup()
     }
 
@@ -124,10 +134,9 @@ class WaledVpnService : VpnService() {
         if (ihl < 20 || data.size < ihl + 4) return
         val proto = data[9].toInt() and 0xFF
         val totalLen = u16(data, 2)
-        val len = minOf(totalLen, data.size)
         when (proto) {
-            6 -> onTcp(data, ihl, len)
-            17 -> onUdp(data, ihl, len)
+            6 -> onTcp(data, ihl, minOf(totalLen, data.size))
+            17 -> onUdp(data, ihl, minOf(totalLen, data.size))
         }
     }
 
@@ -141,30 +150,28 @@ class WaledVpnService : VpnService() {
         val srcIp = readI32(data, 12)
         val dstIp = readI32(data, 16)
         val isSyn = (flags and 0x02) != 0 && (flags and 0x10) == 0
-        val isRst = (flags and 0x04) != 0
-        val isFin = (flags and 0x01) != 0
         val key = srcIp xor srcPort
-        val dstStr = ipStrFromInt(dstIp)
         val seq = readU32(data, ipHdr + 4)
         val ack = readU32(data, ipHdr + 8)
         val payLen = totalLen - ipHdr - tcpHdrLen
 
         when {
-            isSyn && !isRst -> {
-                Log.i(TAG, "TCP SYN $dstStr:$dstPort (sessions=${sessions.size})")
+            isSyn -> {
+                Log.i(TAG, "TCP SYN ${ipStrFromInt(dstIp)}:$dstPort")
                 val session = TcpSession(srcIp, srcPort, dstIp, dstPort, seq)
                 sessions[key] = session
                 thread(name = "SOC-$srcPort") { session.run() }
             }
-            isRst -> { sessions.remove(key)?.close() }
-            isFin -> { sessions[key]?.handleFin(seq, ack) }
-            else -> {
-                sessions[key]?.let { s -> s.handleData(data, ipHdr, tcpHdrLen, payLen, seq, ack, flags) }
-                    ?: Log.w(TAG, "No session for ${ipStrFromInt(srcIp)}:$srcPort -> $dstStr:$dstPort")
-            }
+            (flags and 0x04) != 0 -> sessions.remove(key)?.close()
+            (flags and 0x01) != 0 -> sessions[key]?.handleFin(seq, ack)
+            else -> sessions[key]?.let { s -> s.handleData(data, ipHdr, tcpHdrLen, payLen, seq, ack, flags) }
         }
     }
 
+    /**
+     * ★ v6: UDP 53 → DNS-over-TCP عبر SOCKS5
+     * باقي UDP → direct (protect)
+     */
     private fun onUdp(data: ByteArray, ipHdr: Int, totalLen: Int) {
         if (data.size < ipHdr + 8) return
         val srcPort = u16(data, ipHdr)
@@ -176,109 +183,84 @@ class WaledVpnService : VpnService() {
         val dstIp = ipStr(data, 16)
         val srcIpInt = readI32(data, 12)
         val dstIpInt = readI32(data, 16)
-        val sessionKey = "$dstIp:$dstPort"
 
-        Log.d(TAG, "UDP $sessionKey (${payLen}B)")
+        if (dstPort == DNS_PORT) {
+            Log.i(TAG, "DNS query $dstIp:$dstPort (${payLen}B) → DoT")
+            thread(name = "DNS-$srcPort") {
+                handleDnsOverTcp(data, payOff, payLen, srcIpInt, dstIpInt, srcPort, dstPort, dstIp)
+            }
+            return
+        }
 
         thread(name = "UDP-$srcPort") {
-            // try SOCKS5 UDP ASSOCIATE first, fallback to direct
-            if (sendUdpViaSocks5(dstIp, dstPort, data, payOff, payLen, srcIpInt, dstIpInt, srcPort, dstPort)) {
-                return@thread
-            }
-            // fallback: direct DatagramSocket
             try {
                 val sock = DatagramSocket()
                 protect(sock)
                 sock.soTimeout = UDP_TIMEOUT_MS
-                val p = DatagramPacket(data.copyOfRange(payOff, payOff + payLen), payLen,
-                    InetAddress.getByName(dstIp), dstPort)
-                sock.send(p)
+                sock.send(DatagramPacket(data.copyOfRange(payOff, payOff + payLen), payLen,
+                    InetAddress.getByName(dstIp), dstPort))
                 val rbuf = ByteArray(4096)
                 val rp = DatagramPacket(rbuf, rbuf.size)
                 sock.receive(rp)
                 sock.close()
-                val rlen = rp.length
-                if (rlen > 0) {
+                if (rp.length > 0) {
                     val out = buildUdpPacket(srcIpInt, dstIpInt, srcPort.toShort(), dstPort.toShort(),
-                        rp.data, rp.offset, rlen)
+                        rp.data, rp.offset, rp.length)
                     writeTun(out)
                 }
-            } catch (e: Exception) {
-                Log.w(TAG, "UDP $sessionKey error: ${e.message}")
-            }
+            } catch (_: Exception) {}
         }
     }
 
-    private fun sendUdpViaSocks5(
-        dstIp: String, dstPort: Int, data: ByteArray, payOff: Int, payLen: Int,
-        srcIpInt: Int, dstIpInt: Int, srcPort: Int, dstPortShort: Int
-    ): Boolean {
+    /**
+     * ★ DNS-over-TCP: UDP DNS → 2-byte length prefix + TCP → SOCKS5 → SSH
+     */
+    private fun handleDnsOverTcp(
+        data: ByteArray, payOff: Int, payLen: Int,
+        srcIpInt: Int, dstIpInt: Int, srcPort: Int, dstPort: Int, dstIp: String
+    ) {
         var socks: Socket? = null
         try {
             socks = Socket()
             protect(socks)
-            socks.connect(InetSocketAddress("127.0.0.1", socksPort), 3000)
-            socks.soTimeout = UDP_TIMEOUT_MS
+            socks.connect(InetSocketAddress(socksHost, socksPort), 3000)
+            socks.soTimeout = TCP_DNS_TIMEOUT_MS
             val out = socks.getOutputStream()
             val inp = socks.getInputStream()
 
-            // SOCKS5 greeting
             out.write(byteArrayOf(0x05, 0x01, 0x00)); out.flush()
-            val gbuf = ByteArray(2)
-            inp.read(gbuf)
-            if (gbuf[0] != 0x05.toByte() || gbuf[1] != 0x00.toByte()) return false
+            val gbuf = ByteArray(2); readExact(inp, gbuf)
+            if (gbuf[0] != 0x05.toByte() || gbuf[1] != 0x00.toByte()) return
 
-            // UDP ASSOCIATE
-            out.write(byteArrayOf(0x05, 0x03, 0x00, 0x01, 0, 0, 0, 0, 0, 0))
-            out.flush()
+            val dB = dstIp.toByteArray()
+            val req = byteArrayOf(0x05, 0x01, 0x00, 0x03, dB.size.toByte()) +
+                dB + byteArrayOf((dstPort shr 8).toByte(), dstPort.toByte())
+            out.write(req); out.flush()
 
-            val rbuf = ByteArray(256)
-            val rn = inp.read(rbuf)
-            if (rn < 10 || rbuf[0] != 0x05.toByte() || rbuf[1] != 0x00.toByte()) return false
+            val rbuf = ByteArray(256); val rn = inp.read(rbuf)
+            if (rn < 4 || rbuf[0] != 0x05.toByte() || rbuf[1] != 0x00.toByte()) return
 
-            val relayPort = ((rbuf[8].toInt() and 0xFF) shl 8) or (rbuf[9].toInt() and 0xFF)
-            Log.d(TAG, "SOCKS5 UDP relay port=$relayPort")
+            val dnsQuery = data.copyOfRange(payOff, payOff + payLen)
+            val tcpQuery = ByteArray(2 + dnsQuery.size)
+            tcpQuery[0] = ((dnsQuery.size shr 8) and 0xFF).toByte()
+            tcpQuery[1] = (dnsQuery.size and 0xFF).toByte()
+            System.arraycopy(dnsQuery, 0, tcpQuery, 2, dnsQuery.size)
+            out.write(tcpQuery); out.flush()
 
-            val udpSock = DatagramSocket()
-            protect(udpSock)
-            udpSock.soTimeout = UDP_TIMEOUT_MS
-            val dstIpBytes = InetAddress.getByName(dstIp).address
+            val lenBuf = ByteArray(2); readExact(inp, lenBuf)
+            val respLen = ((lenBuf[0].toInt() and 0xFF) shl 8) or (lenBuf[1].toInt() and 0xFF)
+            if (respLen <= 0 || respLen > 4096) return
+            val respBuf = ByteArray(respLen); readExact(inp, respBuf)
 
-            // SOCKS5 UDP request header: RSV(2) FRAG(1) ATYP(1) DST.ADDR DST.PORT DATA
-            val udpReq = ByteArray(3 + 1 + dstIpBytes.size + 2 + payLen)
-            udpReq[0] = 0; udpReq[1] = 0; udpReq[2] = 0 // RSV + FRAG
-            udpReq[3] = 1 // ATYP IPv4
-            System.arraycopy(dstIpBytes, 0, udpReq, 4, 4)
-            udpReq[8] = ((dstPort shr 8) and 0xFF).toByte()
-            udpReq[9] = (dstPort and 0xFF).toByte()
-            System.arraycopy(data, payOff, udpReq, 10, payLen)
-
-            udpSock.send(DatagramPacket(udpReq, udpReq.size, InetAddress.getByName("127.0.0.1"), relayPort))
-
-            val rbuf2 = ByteArray(4096)
-            val rp = DatagramPacket(rbuf2, rbuf2.size)
-            udpSock.receive(rp)
-            udpSock.close()
-            socks.close()
-
-            val atypSocks = rp.data[rp.offset + 3].toInt() and 0xFF
-            val addrLenSocks = when (atypSocks) {
-                1 -> 4; 3 -> rp.data[rp.offset + 4].toInt() and 0xFF; 4 -> 16; else -> 0
-            }
-            val hdrLen = 4 + addrLenSocks + 2
-            val rlen = rp.length - hdrLen
-            if (rlen > 0) {
-                val out2 = buildUdpPacket(srcIpInt, dstIpInt, srcPort.toShort(), dstPortShort.toShort(),
-                    rp.data, rp.offset + hdrLen, rlen)
-                writeTun(out2)
-                Log.d(TAG, "UDP via SOCKS5 $dstIp:$dstPort → ${rlen}B reply")
-                return true
-            }
+            val udpResponse = buildUdpPacket(srcIpInt, dstIpInt, srcPort.toShort(), dstPort.toShort(),
+                respBuf, 0, respLen)
+            writeTun(udpResponse)
+            Log.i(TAG, "DoT: ✅ ${respLen}B from $dstIp")
         } catch (e: Exception) {
-            Log.w(TAG, "UDP SOCKS5 error: ${e.message}")
+            Log.w(TAG, "DoT: $dstIp error: ${e.message}")
+        } finally {
             try { socks?.close() } catch (_: Exception) {}
         }
-        return false
     }
 
     inner class TcpSession(
@@ -288,7 +270,6 @@ class WaledVpnService : VpnService() {
     ) {
         @Volatile private var closed = false
         private var state = 0
-        private var appSeq = synSeq
         private var srvSeq = (Math.random() * 0xFFFFFFFFL).toLong() and 0xFFFFFFFFL
         private var srvAck = (synSeq + 1) and 0xFFFFFFFFL
         private var socks: Socket? = null
@@ -297,30 +278,29 @@ class WaledVpnService : VpnService() {
 
         fun run() {
             val dstStr = ipStrFromInt(dstIp)
-            Log.i(TAG, "Session $srcPort -> $dstStr:$dstPort starting")
             try {
                 val s = Socket()
                 protect(s)
-                s.connect(InetSocketAddress("127.0.0.1", socksPort), 3000)
+                s.connect(InetSocketAddress(socksHost, socksPort), 3000)
                 s.tcpNoDelay = true
                 socks = s; socksOut = s.getOutputStream(); socksIn = s.getInputStream()
 
                 socksOut!!.write(byteArrayOf(0x05, 0x01, 0x00)); socksOut!!.flush()
-                val gbuf = ByteArray(2); readExact(gbuf)
+                val gbuf = ByteArray(2); readExact(socksIn!!, gbuf)
                 if (gbuf[0] != 0x05.toByte() || gbuf[1] != 0x00.toByte()) return
 
                 val dB = dstStr.toByteArray()
-                val req = byteArrayOf(0x05, 0x01, 0x00, 0x03, dB.size.toByte()) +
-                    dB + byteArrayOf((dstPort shr 8).toByte(), dstPort.toByte())
-                socksOut!!.write(req); socksOut!!.flush()
+                socksOut!!.write(byteArrayOf(0x05, 0x01, 0x00, 0x03, dB.size.toByte()) +
+                    dB + byteArrayOf((dstPort shr 8).toByte(), dstPort.toByte())); socksOut!!.flush()
 
                 val rbuf = ByteArray(256); val rn = socksIn!!.read(rbuf)
                 if (rn < 4 || rbuf[0] != 0x05.toByte() || rbuf[1] != 0x00.toByte()) return
 
                 val synAck = buildTcp(dstIp, srcIp, dstPort.toShort(), srcPort.toShort(),
-                    srvSeq, srvAck, 0x12, 0, null, true)
+                    srvSeq, srvAck, 0x12, 0, includeMss = true)
                 writeTun(synAck)
                 srvSeq = (srvSeq + 1) and 0xFFFFFFFFL
+                Log.i(TAG, "SYN-ACK $dstStr:$dstPort")
 
                 readSocksLoop()
             } catch (e: Exception) {
@@ -331,62 +311,48 @@ class WaledVpnService : VpnService() {
         fun handleData(data: ByteArray, ipHdr: Int, tcpHdrLen: Int, payLen: Int,
                        seq: Long, ack: Long, flags: Int) {
             if (closed || socksOut == null) return
-            val dstStr = ipStrFromInt(dstIp)
-
-            if (state == 0 && (flags and 0x10) != 0 && payLen == 0) {
-                state = 1; return
-            }
-
+            if (state == 0 && (flags and 0x10) != 0 && payLen == 0) { state = 1; return }
             if (payLen > 0) {
                 if (seq != srvAck) {
-                    val dupAck = buildTcp(dstIp, srcIp, dstPort.toShort(), srcPort.toShort(),
-                        srvSeq, srvAck, 0x10, 0)
-                    writeTun(dupAck); return
+                    writeTun(buildTcp(dstIp, srcIp, dstPort.toShort(), srcPort.toShort(),
+                        srvSeq, srvAck, 0x10, 0))
+                    return
                 }
                 try {
                     socksOut!!.write(data, ipHdr + tcpHdrLen, payLen)
                     socksOut!!.flush()
                     srvAck = (srvAck + payLen) and 0xFFFFFFFFL
-                    val ackPkt = buildTcp(dstIp, srcIp, dstPort.toShort(), srcPort.toShort(),
-                        srvSeq, srvAck, 0x10, 0)
-                    writeTun(ackPkt)
-                } catch (e: Exception) { close() }
+                    writeTun(buildTcp(dstIp, srcIp, dstPort.toShort(), srcPort.toShort(),
+                        srvSeq, srvAck, 0x10, 0))
+                } catch (_: Exception) { close() }
             }
         }
 
         fun handleFin(seq: Long, ack: Long) {
-            val dstStr = ipStrFromInt(dstIp)
             if (seq == srvAck) srvAck = (srvAck + 1) and 0xFFFFFFFFL
-            val ackFin = buildTcp(dstIp, srcIp, dstPort.toShort(), srcPort.toShort(),
-                srvSeq, srvAck, 0x10, 0)
-            writeTun(ackFin)
+            writeTun(buildTcp(dstIp, srcIp, dstPort.toShort(), srcPort.toShort(), srvSeq, srvAck, 0x10, 0))
             try { socksOut?.close() } catch (_: Exception) {}
-            val finPkt = buildTcp(dstIp, srcIp, dstPort.toShort(), srcPort.toShort(),
-                srvSeq, srvAck, 0x01, 0)
-            writeTun(finPkt)
+            writeTun(buildTcp(dstIp, srcIp, dstPort.toShort(), srcPort.toShort(), srvSeq, srvAck, 0x01, 0))
+            srvSeq = (srvSeq + 1) and 0xFFFFFFFFL
             close()
         }
 
         private fun readSocksLoop() {
             val buf = ByteArray(65535)
-            var total = 0L
             while (running && !closed) {
                 try {
                     val n = socksIn!!.read(buf)
                     if (n <= 0) {
-                        val finPkt = buildTcp(dstIp, srcIp, dstPort.toShort(), srcPort.toShort(),
-                            srvSeq, srvAck, 0x01, 0)
-                        writeTun(finPkt)
+                        writeTun(buildTcp(dstIp, srcIp, dstPort.toShort(), srcPort.toShort(),
+                            srvSeq, srvAck, 0x01, 0))
+                        srvSeq = (srvSeq + 1) and 0xFFFFFFFFL
                         break
                     }
-                    total += n
-                    val out = buildTcp(dstIp, srcIp, dstPort.toShort(), srcPort.toShort(),
-                        srvSeq, srvAck, 0x18, n, buf)
-                    writeTun(out)
+                    writeTun(buildTcp(dstIp, srcIp, dstPort.toShort(), srcPort.toShort(),
+                        srvSeq, srvAck, 0x18, n, buf))
                     srvSeq = (srvSeq + n) and 0xFFFFFFFFL
                 } catch (_: Exception) { break }
             }
-            if (total > 0) Log.i(TAG, "SOCKS->TUN relay done for ${ipStrFromInt(dstIp)}:$dstPort, $total bytes")
         }
 
         fun close() {
@@ -395,24 +361,19 @@ class WaledVpnService : VpnService() {
             sessions.remove(srcIp xor srcPort)
         }
 
-        private fun readExact(buf: ByteArray) {
+        private fun readExact(inp: java.io.InputStream, buf: ByteArray) {
             var off = 0
-            while (off < buf.size) {
-                val n = socksIn!!.read(buf, off, buf.size - off)
-                if (n <= 0) throw Exception("EOF"); off += n
-            }
+            while (off < buf.size) { val n = inp.read(buf, off, buf.size - off)
+                if (n <= 0) throw Exception("EOF"); off += n }
         }
     }
 
     private fun buildTcp(srcIp: Int, dstIp: Int, srcP: Short, dstP: Short,
                          seq: Long, ack: Long, flags: Int, dataLen: Int,
                          payload: ByteArray? = null, includeMss: Boolean = false): ByteArray {
-        val opts = if (includeMss) 4 else 0
-        val tcpHdrLen = 20 + opts
-        val total = 20 + tcpHdrLen + dataLen
-        val p = ByteArray(total)
-        p[0] = 0x45; u16w(p, 2, total)
-        p[6] = 0x40.toByte(); p[8] = 64.toByte(); p[9] = 6
+        val opts = if (includeMss) 4 else 0; val tcpHdrLen = 20 + opts
+        val total = 20 + tcpHdrLen + dataLen; val p = ByteArray(total)
+        p[0] = 0x45; u16w(p, 2, total); p[6] = 0x40.toByte(); p[8] = 64.toByte(); p[9] = 6
         i32w(p, 12, srcIp); i32w(p, 16, dstIp)
         u16w(p, 20, srcP.toInt() and 0xFFFF); u16w(p, 22, dstP.toInt() and 0xFFFF)
         u32w(p, 24, seq); u32w(p, 28, ack)
@@ -426,21 +387,20 @@ class WaledVpnService : VpnService() {
     }
 
     private fun buildUdpPacket(srcIp: Int, dstIp: Int, srcP: Short, dstP: Short,
-                               data: ByteArray, off: Int, len: Int): ByteArray {
-        val total = 20 + 8 + len; val p = ByteArray(total)
+                               data: ByteArray, dataOff: Int, dataLen: Int): ByteArray {
+        val total = 20 + 8 + dataLen; val p = ByteArray(total)
         p[0] = 0x45; u16w(p, 2, total); p[6] = 0x40.toByte(); p[8] = 64.toByte(); p[9] = 17
         i32w(p, 12, srcIp); i32w(p, 16, dstIp)
         u16w(p, 20, srcP.toInt() and 0xFFFF); u16w(p, 22, dstP.toInt() and 0xFFFF)
-        u16w(p, 24, 8 + len); u16w(p, 26, 0)
-        System.arraycopy(data, off, p, 28, len)
-        u16w(p, 10, ipCsum(p, 0, 20)); u16w(p, 26, udpCsum(p, 20, 8 + len, p, 12, p, 16))
+        u16w(p, 24, 8 + dataLen); u16w(p, 26, 0)
+        System.arraycopy(data, dataOff, p, 28, dataLen)
+        u16w(p, 10, ipCsum(p, 0, 20)); u16w(p, 26, udpCsum(p, 20, 8 + dataLen, p, 12, p, 16))
         return p
     }
 
     private fun writeTun(data: ByteArray) {
         if (!running) return
-        try { synchronized(tunOutput!!) { tunOutput!!.write(data); tunOutput!!.flush() } }
-        catch (e: Exception) { Log.w(TAG, "TUN write error: ${e.message}") }
+        try { synchronized(tunOutput!!) { tunOutput!!.write(data); tunOutput!!.flush() } } catch (_: Exception) {}
     }
 
     private fun ipCsum(d: ByteArray, off: Int, len: Int): Int {
@@ -469,6 +429,12 @@ class WaledVpnService : VpnService() {
         while (i < buf.size - 1) { s += ((buf[i].toInt() and 0xFF) shl 8) or (buf[i + 1].toInt() and 0xFF); i += 2 }
         while (s > 0xFFFF) s = (s and 0xFFFF) + (s shr 16)
         return if (s == 0) 0xFFFF else s.inv() and 0xFFFF
+    }
+
+    private fun readExact(inp: java.io.InputStream, buf: ByteArray) {
+        var off = 0
+        while (off < buf.size) { val n = inp.read(buf, off, buf.size - off)
+            if (n <= 0) throw Exception("EOF"); off += n }
     }
 
     private fun u16(d: ByteArray, o: Int) = ((d[o].toInt() and 0xFF) shl 8) or (d[o + 1].toInt() and 0xFF)
@@ -502,7 +468,6 @@ class WaledVpnService : VpnService() {
     }
 
     private fun cleanup() {
-        Log.i(TAG, "Cleanup: closing ${sessions.size} sessions")
         sessions.values.forEach { it.close() }; sessions.clear()
         try { tunInput?.close() } catch (_: Exception) {}
         try { tunOutput?.close() } catch (_: Exception) {}
