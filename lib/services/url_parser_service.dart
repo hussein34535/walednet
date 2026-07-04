@@ -162,8 +162,13 @@ class UrlParserService {
         "log": {"loglevel": "warning"},
         "dns": {
           "servers": [
-            "https://1.1.1.1/dns-query",
-            "https://8.8.8.8/dns-query"
+            {
+              "address": "https://1.1.1.1/dns-query",
+              "domains": ["geosite:geolocation-!cn"]
+            },
+            "https://8.8.8.8/dns-query",
+            "1.1.1.1",
+            "8.8.8.8"
           ],
           "queryStrategy": "UseIP"
         },
@@ -171,9 +176,13 @@ class UrlParserService {
           {
             "tag": "socks-in",
             "protocol": "socks",
-            "listen": "0.0.0.0",
+            "listen": "127.0.0.1",
             "port": 10808,
-            "settings": {"auth": "noauth", "udp": true}
+            "settings": {"auth": "noauth", "udp": true},
+            "sniffing": {
+              "enabled": true,
+              "destOverride": ["http", "tls", "quic"]
+            }
           }
         ],
         "outbounds": [
@@ -187,54 +196,43 @@ class UrlParserService {
             }
           },
           {"protocol": "freedom", "tag": "direct", "settings": {}},
-          {"protocol": "blackhole", "tag": "block", "settings": {}}
+          {"protocol": "blackhole", "tag": "block", "settings": {}},
+          {"protocol": "dns", "tag": "dns-out"}
         ],
         "routing": {
-          "domainStrategy": "AsIs",
+          "domainStrategy": "IPIfNonMatch",
           "rules": [
-            {
-              "type": "field",
-              "ip": ["127.0.0.0/8", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"],
-              "outboundTag": "direct"
-            },
-            {
-              "type": "field",
-              "ip": [sshHost],
-              "outboundTag": "direct"
-            },
-            {
-              "type": "field",
-              "domain": [sshHost],
-              "outboundTag": "direct"
-            },
-            {
-              "type": "field",
-              "port": 53,
-              "network": "udp",
-              "outboundTag": "block"
-            },
-            {
-              "type": "field",
-              "network": "udp",
-              "outboundTag": "direct"
-            }
+            {"type": "field", "port": 53, "outboundTag": "dns-out"},
+            {"type": "field", "ip": ["127.0.0.0/8"], "outboundTag": "direct"},
+            {"type": "field", "ip": ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"], "outboundTag": "direct"},
+            {"type": "field", "ip": [sshHost], "outboundTag": "direct"},
+            {"type": "field", "domain": [sshHost], "outboundTag": "direct"},
           ]
         }
       };
     }
-    // Windows: keeps original SOCKS inbound + tun2socks approach
+    // Windows: same changes
     return {
       "log": {"loglevel": "warning"},
       "dns": {
-        "servers": ["https://1.1.1.1/dns-query", "https://8.8.8.8/dns-query"],
+        "servers": [
+          "https://1.1.1.1/dns-query",
+          "https://8.8.8.8/dns-query",
+          "1.1.1.1",
+          "8.8.8.8"
+        ],
         "queryStrategy": "UseIP"
       },
       "inbounds": [
         {
           "port": 10808,
           "protocol": "socks",
-          "listen": "0.0.0.0",
-          "settings": {"auth": "noauth", "udp": true}
+          "listen": "127.0.0.1",
+          "settings": {"auth": "noauth", "udp": true},
+          "sniffing": {
+            "enabled": true,
+            "destOverride": ["http", "tls", "quic"]
+          }
         }
       ],
       "outbounds": [
@@ -248,37 +246,17 @@ class UrlParserService {
           }
         },
         {"protocol": "freedom", "tag": "direct", "settings": {}},
-        {"protocol": "blackhole", "tag": "block", "settings": {}}
+        {"protocol": "blackhole", "tag": "block", "settings": {}},
+        {"protocol": "dns", "tag": "dns-out"}
       ],
       "routing": {
-        "domainStrategy": "AsIs",
+        "domainStrategy": "IPIfNonMatch",
         "rules": [
-          {
-            "type": "field",
-            "ip": ["127.0.0.0/8", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"],
-            "outboundTag": "direct"
-          },
-          {
-            "type": "field",
-            "ip": [sshHost],
-            "outboundTag": "direct"
-          },
-          {
-            "type": "field",
-            "domain": [sshHost],
-            "outboundTag": "direct"
-          },
-          {
-            "type": "field",
-            "port": 53,
-            "network": "udp",
-            "outboundTag": "block"
-          },
-          {
-            "type": "field",
-            "network": "udp",
-            "outboundTag": "direct"
-          }
+          {"type": "field", "port": 53, "outboundTag": "dns-out"},
+          {"type": "field", "ip": ["127.0.0.0/8"], "outboundTag": "direct"},
+          {"type": "field", "ip": ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"], "outboundTag": "direct"},
+          {"type": "field", "ip": [sshHost], "outboundTag": "direct"},
+          {"type": "field", "domain": [sshHost], "outboundTag": "direct"},
         ]
       }
     };

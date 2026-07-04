@@ -1,5 +1,3 @@
-import 'package:unity_ads_plugin/unity_ads_plugin.dart';
-
 class AdService {
   static const String gameId = '5833433';
   static const String rewardedPlacementId = 'Rewarded_Android';
@@ -21,105 +19,14 @@ class AdService {
   });
 
   void initialize() {
-    try {
-      UnityAds.init(
-        gameId: gameId,
-        testMode: false,
-        onComplete: () {
-          print('Unity Ads initialization complete.');
-          loadRewardedAd();
-          loadInterstitialAd();
-        },
-        onFailed: (error, message) {
-          print('Unity Ads initialization failed: $error $message');
-        },
-      );
-    } catch (e) {
-      print('Unity Ads initialization failed: $e');
-    }
+    print('Unity Ads disabled (removed for Android 8 compatibility)');
   }
 
-  void loadRewardedAd() {
-    isRewardedAdReady = false;
-    onRewardedReadyChanged(false);
-    UnityAds.load(
-      placementId: rewardedPlacementId,
-      onComplete: (placementId) {
-        print('Load Complete: $placementId');
-        isRewardedAdReady = true;
-        onRewardedReadyChanged(true);
-      },
-      onFailed: (placementId, error, message) {
-        print('Load Failed $placementId: $error $message');
-        isRewardedAdReady = false;
-        onRewardedReadyChanged(false);
-        onAdFailed('فشل تحميل الإعلان، يرجى المحاولة مرة أخرى.');
-      },
-    );
-  }
+  void loadRewardedAd() {}
 
-  void loadInterstitialAd() {
-    isInterstitialAdReady = false;
-    onInterstitialReadyChanged(false);
-    UnityAds.load(
-      placementId: interstitialPlacementId,
-      onComplete: (placementId) {
-        print('Load Complete: $placementId');
-        isInterstitialAdReady = true;
-        onInterstitialReadyChanged(true);
-      },
-      onFailed: (placementId, error, message) {
-        print('Load Failed $placementId: $error $message');
-        isInterstitialAdReady = false;
-        onInterstitialReadyChanged(false);
-      },
-    );
-  }
+  void loadInterstitialAd() {}
 
-  void showInterstitialAd() {
-    if (!isInterstitialAdReady) {
-      print('Interstitial Ad not ready, skipping show.');
-      return;
-    }
+  void showInterstitialAd() {}
 
-    UnityAds.showVideoAd(
-      placementId: interstitialPlacementId,
-      onComplete: (placementId) {
-        print('Video Ad ($placementId) completed');
-      },
-      onFailed: (placementId, error, message) {
-        print('Video Ad ($placementId) failed: $error $message');
-      },
-      onStart: (placementId) => print('Video Ad ($placementId) start'),
-      onClick: (placementId) => print('Video Ad ($placementId) click'),
-      onSkipped: (placementId) {
-        print('Video Ad ($placementId) skipped');
-      },
-    );
-  }
-
-  void showRewardedAd() {
-    if (!isRewardedAdReady) {
-      onAdFailed('الإعلان غير جاهز بعد، يرجى المحاولة مرة أخرى.');
-      return;
-    }
-
-    UnityAds.showVideoAd(
-      placementId: rewardedPlacementId,
-      onComplete: (placementId) async {
-        print('Video Ad ($placementId) completed');
-        onRewardedCompleted();
-      },
-      onFailed: (placementId, error, message) {
-        print('Video Ad ($placementId) failed: $error - $message');
-        onAdFailed('فشل عرض الإعلان، يرجى المحاولة مرة أخرى');
-      },
-      onStart: (placementId) => print('Video Ad ($placementId) start'),
-      onClick: (placementId) => print('Video Ad ($placementId) click'),
-      onSkipped: (placementId) {
-        print('Video Ad ($placementId) skipped');
-        onAdFailed('يجب مشاهدة الإعلان بالكامل للاتصال');
-      },
-    );
-  }
+  void showRewardedAd() {}
 }
