@@ -15,35 +15,46 @@ class SingboxConfigBuilder {
       'dns': {
         'servers': [
           {
-            'tag': 'cloudflare',
+            'tag': 'remote',
             'address': 'https://1.1.1.1/dns-query',
+            'address_resolver': 'local',
             'detour': 'proxy',
+            'strategy': 'ipv4_only',
           },
           {
             'tag': 'local',
             'address': 'local',
             'detour': 'direct',
           },
+          {
+            'tag': 'fakeip',
+            'address': 'fakeip',
+            'strategy': 'ipv4_only',
+          },
         ],
         'rules': [
+          {
+            'query_type': ['A', 'AAAA'],
+            'server': 'fakeip',
+          },
           {
             'outbound': 'any',
             'server': 'local',
           },
         ],
+        'final': 'remote',
         'strategy': 'ipv4_only',
-        'fakeip': {
-          'enabled': true,
-          'inet4_range': '198.18.0.0/15',
-        },
+        'independent_cache': true,
       },
       'inbounds': [
         {
           'type': 'tun',
           'tag': 'tun-in',
           'interface_name': 'tun0',
-          'inet4_address': '172.19.0.1/30',
-          'inet6_address': 'fdfe:dcba:9876::1/126',
+          'address': [
+            '172.19.0.1/30',
+            'fdfe:dcba:9876::1/126',
+          ],
           'mtu': 1500,
           'auto_route': true,
           'strict_route': true,
@@ -52,7 +63,15 @@ class SingboxConfigBuilder {
             'tcp://any:53',
             'udp://any:53',
           ],
-          'sniff': true,
+          'sniff': {
+            'enabled': true,
+            'override_destination': true,
+          },
+          'platform': {
+            'http_proxy': {
+              'enabled': false,
+            },
+          },
         },
       ],
       'outbounds': [

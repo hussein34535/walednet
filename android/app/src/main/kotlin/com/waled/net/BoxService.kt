@@ -4,11 +4,10 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
-import android.app.Service
-import android.content.Context
 import android.content.Intent
+import android.net.VpnService
 import android.os.Build
-import android.os.IBinder
+import android.os.ParcelFileDescriptor
 import android.util.Log
 import io.nekohasekai.libbox.CommandClient
 import io.nekohasekai.libbox.CommandClientHandler
@@ -22,9 +21,19 @@ import io.nekohasekai.libbox.SetupOptions
 import io.nekohasekai.libbox.StatusMessage
 import io.nekohasekai.libbox.StringIterator
 import io.nekohasekai.libbox.SystemProxyStatus
+import io.nekohasekai.libbox.TunOptions
+import io.nekohasekai.libbox.PlatformInterface
+import io.nekohasekai.libbox.ConnectionOwner
+import io.nekohasekai.libbox.InterfaceUpdateListener
+import io.nekohasekai.libbox.LocalDNSTransport
+import io.nekohasekai.libbox.NeighborUpdateListener
+import io.nekohasekai.libbox.NetworkInterfaceIterator
+import io.nekohasekai.libbox.PlatformUser
+import io.nekohasekai.libbox.ShellSession
+import io.nekohasekai.libbox.WIFIState
 import java.io.File
 
-class BoxService : Service() {
+class BoxService : VpnService(), PlatformInterface {
 
     companion object {
         private const val TAG = "WaledBox"
@@ -58,6 +67,7 @@ class BoxService : Service() {
 
     private var commandServer: CommandServer? = null
     private var commandClient: CommandClient? = null
+    private var tunFd: ParcelFileDescriptor? = null
     private var isRunning = false
 
     private val serverHandler = object : CommandServerHandler {
@@ -77,38 +87,32 @@ class BoxService : Service() {
             }
         }
 
-        override fun setSystemProxyEnabled(enabled: Boolean) {
-            Log.i(TAG, "setSystemProxyEnabled($enabled)")
-        }
+        override fun setSystemProxyEnabled(enabled: Boolean) {}
 
-        override fun triggerNativeCrash() {
-            Log.w(TAG, "triggerNativeCrash called")
-        }
+        override fun triggerNativeCrash() {}
 
         override fun writeDebugMessage(message: String) {
             Log.d(TAG, "debug: $message")
         }
 
-        override fun connectSSHAgent(): Int {
-            return -1
-        }
+        override fun connectSSHAgent(): Int = -1
     }
 
     private val clientHandler = object : CommandClientHandler {
         override fun connected() {
             Log.i(TAG, "CommandClient connected")
+            lastStatus = "connected"
+            statusListener?.invoke("connected")
         }
 
         override fun disconnected(message: String) {
             Log.i(TAG, "CommandClient disconnected: $message")
+            lastStatus = "disconnected"
+            statusListener?.invoke("disconnected")
         }
 
         override fun writeStatus(status: StatusMessage) {
-            val text = buildString {
-                append("↑ ${Libbox.formatBitrate(status.uplink)}")
-                append(" ↓ ${Libbox.formatBitrate(status.downlink)}")
-                append(" | ${status.connectionsIn}/${status.connectionsOut}")
-            }
+            val text = "↑ ${Libbox.formatBitrate(status.uplink)} ↓ ${Libbox.formatBitrate(status.downlink)}"
             lastStatus = text
             lastUplink = status.uplink
             lastDownlink = status.downlink
@@ -117,9 +121,13 @@ class BoxService : Service() {
         }
 
         override fun writeLogs(it: io.nekohasekai.libbox.LogIterator) {
-            while (it.hasNext()) {
-                val entry = it.next() ?: continue
-                logListener?.invoke(entry.message)
+            try {
+                while (it.hasNext()) {
+                    val entry = it.next() ?: continue
+                    logListener?.invoke(entry.message)
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "writeLogs error: ${e.message}")
             }
         }
 
@@ -136,15 +144,24 @@ class BoxService : Service() {
         super.onCreate()
         instance = this
         createNotificationChannel()
-        Log.i(TAG, "BoxService created")
+        Log.i(TAG, "BoxService (VpnService) created")
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        Log.i(TAG, "onStartCommand: action=${intent?.action}")
+
         when (intent?.action) {
             ACTION_START -> {
                 val config = intent.getStringExtra(EXTRA_CONFIG) ?: ""
                 if (config.isNotEmpty()) {
-                    startForeground(NOTIFICATION_ID, buildNotification("Starting..."))
+                    try {
+                        startForeground(NOTIFICATION_ID, buildNotification("Starting..."))
+                        Log.i(TAG, "startForeground called")
+                    } catch (e: Exception) {
+                        Log.e(TAG, "startForeground failed: ${e.message}")
+                        stopSelf()
+                        return START_NOT_STICKY
+                    }
                     startVPN(config)
                 }
             }
@@ -164,7 +181,12 @@ class BoxService : Service() {
         Log.i(TAG, "BoxService destroyed")
     }
 
-    override fun onBind(intent: Intent?): IBinder? = null
+    override fun onRevoke() {
+        Log.w(TAG, "onRevoke - VPN revoked by system")
+        stopVPN()
+        stopForeground(true)
+        stopSelf()
+    }
 
     private fun startVPN(configJson: String) {
         if (isRunning) {
@@ -180,6 +202,7 @@ class BoxService : Service() {
         try {
             val basePath = File(filesDir, "libbox").also { it.mkdirs() }.absolutePath
 
+            Log.i(TAG, "Setting up libbox...")
             Libbox.setup(SetupOptions().apply {
                 this.basePath = basePath
                 this.workingPath = filesDir.absolutePath
@@ -189,15 +212,11 @@ class BoxService : Service() {
                 this.logMaxLines = 1000
             })
 
-            val platformInterface = VPNService.instance
-            if (platformInterface == null) {
-                Log.e(TAG, "VPNService not ready")
-                stopSelf()
-                return
-            }
-
-            commandServer = Libbox.newCommandServer(serverHandler, platformInterface)
+            Log.i(TAG, "Creating CommandServer (PlatformInterface=this)")
+            commandServer = Libbox.newCommandServer(serverHandler, this)
             commandServer!!.start()
+
+            Log.i(TAG, "Starting sing-box service...")
             commandServer!!.startOrReloadService(configJson, OverrideOptions())
 
             isRunning = true
@@ -224,7 +243,7 @@ class BoxService : Service() {
     }
 
     fun stopVPN() {
-        if (!isRunning) return
+        if (!isRunning && commandServer == null) return
         isRunning = false
         lastStatus = "disconnected"
 
@@ -235,13 +254,135 @@ class BoxService : Service() {
         try { commandServer?.close() } catch (_: Exception) {}
         commandServer = null
 
+        try { tunFd?.close() } catch (_: Exception) {}
+        tunFd = null
+
         Log.i(TAG, "sing-box stopped")
+        statusListener?.invoke("disconnected")
     }
+
+    override fun openTun(options: TunOptions): Int {
+        Log.i(TAG, "openTun() called by libbox")
+        Log.i(TAG, "  MTU: ${options.mtu}")
+
+        try {
+            val builder = Builder()
+            builder.setSession("WaledNet")
+            builder.setMtu(options.mtu)
+
+            val inet4 = options.inet4Address
+            if (inet4.hasNext()) {
+                val first = inet4.next()
+                builder.addAddress(first.address(), first.prefix())
+            }
+
+            val inet4route = options.inet4RouteAddress
+            while (inet4route.hasNext()) {
+                val r = inet4route.next()
+                builder.addRoute(r.address(), r.prefix())
+                Log.d(TAG, "  Route: ${r.address()}/${r.prefix()}")
+            }
+
+            val dnsServers = options.dnsServerAddress
+            while (dnsServers.hasNext()) {
+                val dns = dnsServers.next()
+                builder.addDnsServer(dns)
+                Log.d(TAG, "  DNS: $dns")
+            }
+
+            builder.addDisallowedApplication(packageName)
+            Log.i(TAG, "  Excluded self: $packageName")
+
+            val excludePkg = options.excludePackage
+            while (excludePkg.hasNext()) {
+                val pkg = excludePkg.next()
+                if (pkg != packageName) {
+                    builder.addDisallowedApplication(pkg)
+                }
+            }
+
+            val includePkg = options.includePackage
+            while (includePkg.hasNext()) {
+                val pkg = includePkg.next()
+                if (pkg != packageName) {
+                    builder.addAllowedApplication(pkg)
+                }
+            }
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                builder.setMetered(false)
+            }
+
+            tunFd = builder.establish()
+            if (tunFd == null) {
+                Log.e(TAG, "Builder.establish() returned null!")
+                return -1
+            }
+
+            Log.i(TAG, "TUN established, fd=${tunFd!!.fd}")
+            return tunFd!!.fd
+
+        } catch (e: Exception) {
+            Log.e(TAG, "openTun failed: ${e.message}", e)
+            return -1
+        }
+    }
+
+    override fun autoDetectInterfaceControl(fd: Int) {
+        val result = protect(fd)
+        Log.d(TAG, "protect(fd=$fd) -> $result")
+    }
+
+    override fun sendNotification(notification: LibboxNotification) {
+        val text = notification.body ?: notification.title ?: "VPN Active"
+        updateNotification(text)
+    }
+
+    override fun clearDNSCache() {}
+    override fun useProcFS(): Boolean = false
+    override fun underNetworkExtension(): Boolean = false
+    override fun includeAllNetworks(): Boolean = false
+    override fun usePlatformAutoDetectInterfaceControl(): Boolean = true
+    override fun usePlatformShell(): Boolean = false
+    override fun checkPlatformShell() {}
+    override fun getInterfaces(): NetworkInterfaceIterator? = null
+    override fun readWIFIState(): WIFIState? = null
+
+    override fun findConnectionOwner(
+        ipProtocol: Int,
+        sourceAddress: String,
+        sourcePort: Int,
+        destAddress: String,
+        destPort: Int
+    ): ConnectionOwner? = null
+
+    override fun localDNSTransport(): LocalDNSTransport? = null
+    override fun registerMyInterface(name: String) {}
+    override fun startDefaultInterfaceMonitor(listener: InterfaceUpdateListener) {}
+    override fun closeDefaultInterfaceMonitor(listener: InterfaceUpdateListener) {}
+    override fun startNeighborMonitor(listener: NeighborUpdateListener) {}
+    override fun closeNeighborMonitor(listener: NeighborUpdateListener) {}
+    override fun lookupUser(username: String): PlatformUser? = null
+
+    override fun openShellSession(
+        user: PlatformUser,
+        command: String,
+        args: StringIterator,
+        term: String,
+        rows: Int,
+        cols: Int
+    ): ShellSession? = null
+
+    override fun lookupSFTPServer(): String = ""
+    override fun readSystemSSHHostKey(): String = ""
+    override fun tailscaleHostname(): String = ""
 
     fun updateNotification(text: String) {
         lastStatus = text
         if (isRunning) {
-            startForeground(NOTIFICATION_ID, buildNotification(text))
+            try {
+                startForeground(NOTIFICATION_ID, buildNotification(text))
+            } catch (_: Exception) {}
         }
     }
 
@@ -254,8 +395,7 @@ class BoxService : Service() {
                 description = "VPN connection status"
                 setShowBadge(false)
             }
-            val nm = getSystemService(NotificationManager::class.java)
-            nm.createNotificationChannel(channel)
+            getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
         }
     }
 

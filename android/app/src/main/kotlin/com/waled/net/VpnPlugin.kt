@@ -22,8 +22,6 @@ class VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     private var methodChannel: MethodChannel? = null
     private var statusEventChannel: EventChannel? = null
     private var trafficEventChannel: EventChannel? = null
-    private var statusSink: EventChannel.EventSink? = null
-    private var trafficSink: EventChannel.EventSink? = null
 
     override fun onAttachedToEngine(binding: FlutterPlugin.FlutterPluginBinding) {
         context = binding.applicationContext
@@ -33,29 +31,27 @@ class VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         statusEventChannel = EventChannel(binding.binaryMessenger, STATUS_EVENT_CHANNEL).apply {
             setStreamHandler(object : EventChannel.StreamHandler {
                 override fun onListen(args: Any?, sink: EventChannel.EventSink) {
-                    statusSink = sink
                     sink.success(BoxService.lastStatus)
-                    BoxService.statusListener = { msg -> sink.success(msg) }
+                    BoxService.statusListener = { msg ->
+                        try { sink.success(msg) } catch (_: Exception) {}
+                    }
                 }
-
                 override fun onCancel(args: Any?) {
                     BoxService.statusListener = null
-                    statusSink = null
                 }
             })
         }
         trafficEventChannel = EventChannel(binding.binaryMessenger, TRAFFIC_EVENT_CHANNEL).apply {
             setStreamHandler(object : EventChannel.StreamHandler {
                 override fun onListen(args: Any?, sink: EventChannel.EventSink) {
-                    trafficSink = sink
                     BoxService.trafficListener = { uplink, downlink ->
-                        sink.success(mapOf("uplink" to uplink, "downlink" to downlink))
+                        try {
+                            sink.success(mapOf("uplink" to uplink, "downlink" to downlink))
+                        } catch (_: Exception) {}
                     }
                 }
-
                 override fun onCancel(args: Any?) {
                     BoxService.trafficListener = null
-                    trafficSink = null
                 }
             })
         }
@@ -82,7 +78,7 @@ class VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                 result.success(true)
             }
             "isConnected" -> {
-                result.success(BoxService.instance != null && BoxService.lastStatus != "disconnected")
+                result.success(BoxService.instance != null)
             }
             else -> result.notImplemented()
         }
@@ -93,18 +89,17 @@ class VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             val ctx = context ?: run {
                 result.error("NO_CONTEXT", "Context is null", null); return
             }
+
             if (VpnService.prepare(ctx) != null) {
                 result.error("NO_PERMISSION", "VPN permission not granted", null)
                 return
             }
-            val intent = Intent(ctx, VPNService::class.java)
-            ctx.startService(intent)
 
-            val boxIntent = Intent(ctx, BoxService::class.java).apply {
+            val intent = Intent(ctx, BoxService::class.java).apply {
                 action = BoxService.ACTION_START
                 putExtra(BoxService.EXTRA_CONFIG, config)
             }
-            ctx.startForegroundService(boxIntent)
+            ctx.startForegroundService(intent)
             Log.i(TAG, "BoxService started")
             result.success(true)
         } catch (e: Exception) {
@@ -134,8 +129,6 @@ class VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         statusEventChannel = null
         trafficEventChannel?.setStreamHandler(null)
         trafficEventChannel = null
-        statusSink = null
-        trafficSink = null
         context = null
         Log.i(TAG, "VpnPlugin detached")
     }
