@@ -82,14 +82,14 @@ class _MyHomePageState extends State<MyHomePage>
 
     final isConnected = vpnProvider.vpnStatus == 'CONNECTED' ||
         vpnProvider.vpnStatus == 'CONNECTING' ||
-        vpnProvider.status?.state == 'CONNECTED' ||
-        vpnProvider.status?.state == 'CONNECTING' ||
+        vpnProvider.vpnStatus == 'CONNECTED' ||
+        vpnProvider.vpnStatus == 'CONNECTING' ||
         vpnProvider.isVerifyingConnection ||
         vpnProvider.isConnectingUserTrigger;
 
     final bool isButtonLoading = vpnProvider.isLoading ||
         (vpnProvider.isAdLoading && !isConnected) ||
-        (vpnProvider.status?.state == 'CONNECTING') ||
+        (vpnProvider.vpnStatus == 'CONNECTING') ||
         vpnProvider.isVerifyingConnection;
 
     // Control pulse animation based on status
@@ -291,9 +291,7 @@ class _MyHomePageState extends State<MyHomePage>
 
   Widget _buildConnectionDetails(VpnProvider vpnProvider) {
     final isConnected = vpnProvider.vpnStatus == 'CONNECTED' ||
-        vpnProvider.vpnStatus == 'CONNECTING' ||
-        vpnProvider.status?.state == 'CONNECTED' ||
-        vpnProvider.status?.state == 'CONNECTING';
+        vpnProvider.vpnStatus == 'CONNECTING';
 
     return Column(
       children: [

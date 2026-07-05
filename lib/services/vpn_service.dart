@@ -1,117 +1,129 @@
+import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/services.dart';
-import 'package:flutter_v2ray_client/flutter_v2ray.dart';
+
+enum VpnState {
+  disconnected,
+  connecting,
+  connected,
+  error,
+}
+
+class VpnStatus {
+  final VpnState state;
+  final String message;
+  final int uplink;
+  final int downlink;
+
+  VpnStatus({
+    required this.state,
+    this.message = '',
+    this.uplink = 0,
+    this.downlink = 0,
+  });
+}
 
 class VpnService {
-  late final V2ray? _flutterV2ray;
-  static const _tunnelChannel = MethodChannel('com.waled.net/vpn_tunnel');
+  static const _methodChannel = MethodChannel('waled_net/vpn');
+  static const _statusEventChannel = EventChannel('waled_net/status');
+  static const _trafficEventChannel = EventChannel('waled_net/traffic');
 
-  VpnService({required void Function(V2RayStatus) onStatusChanged}) {
-    if (Platform.isAndroid || Platform.isIOS) {
-      _flutterV2ray = V2ray(onStatusChanged: onStatusChanged);
-    } else {
-      _flutterV2ray = null;
-    }
+  static final VpnService _instance = VpnService._internal();
+  factory VpnService() => _instance;
+  VpnService._internal();
+
+  final _statusController = StreamController<VpnStatus>.broadcast();
+  Stream<VpnStatus> get statusStream => _statusController.stream;
+
+  VpnState _state = VpnState.disconnected;
+  VpnState get state => _state;
+
+  StreamSubscription? _statusSub;
+  StreamSubscription? _trafficSub;
+
+  void initialize() {
+    _statusSub = _statusEventChannel.receiveBroadcastStream().listen((data) {
+      final message = data.toString();
+      _updateState(message);
+    });
+
+    _trafficSub = _trafficEventChannel.receiveBroadcastStream().listen((data) {
+      if (data is Map) {
+        final uplink = (data['uplink'] ?? 0) as num;
+        final downlink = (data['downlink'] ?? 0) as num;
+        _statusController.add(VpnStatus(
+          state: _state,
+          uplink: uplink.toInt(),
+          downlink: downlink.toInt(),
+        ));
+      }
+    });
   }
 
-  Future<void> initializeV2Ray() async {
-    if (Platform.isAndroid || Platform.isIOS) {
-      await _flutterV2ray?.initialize();
+  void _updateState(String message) {
+    if (message.contains('start') || message.contains('connecting')) {
+      _state = VpnState.connecting;
+    } else if (message.contains('started') || message.contains('connected')) {
+      _state = VpnState.connected;
+    } else if (message.contains('stop') || message.contains('closed')) {
+      _state = VpnState.disconnected;
+    } else if (message.contains('error') || message.contains('failed')) {
+      _state = VpnState.error;
     }
+    _statusController.add(VpnStatus(state: _state, message: message));
   }
 
   Future<bool> requestPermission() async {
-    if (Platform.isAndroid || Platform.isIOS) {
-      return await _flutterV2ray?.requestPermission() ?? false;
-    }
-    return true;
-  }
-
-  Future<void> startV2Ray({
-    required String remark,
-    required String config,
-    List<String>? bypassSubnets,
-    bool proxyOnly = false,
-    int sshLocalPort = -1,
-    List<String>? blockedApps,
-  }) async {
-    if (Platform.isAndroid || Platform.isIOS) {
-      await _flutterV2ray?.startV2Ray(
-        remark: remark,
-        config: config,
-        bypassSubnets: bypassSubnets,
-        proxyOnly: proxyOnly,
-        sshLocalPort: sshLocalPort,
-        blockedApps: blockedApps,
-      );
-    }
-  }
-
-  Future<void> stopV2Ray() async {
-    if (Platform.isAndroid || Platform.isIOS) {
-      await _flutterV2ray?.stopV2Ray();
-    }
-  }
-
-  Future<int> getServerDelay({required String config}) async {
-    if (Platform.isAndroid || Platform.isIOS) {
-      try {
-        return await _flutterV2ray?.getServerDelay(config: config) ?? -1;
-      } catch (e) {
-        print('[VpnService] Error getting server delay: $e');
-        return -1;
-      }
-    }
-    return -1;
-  }
-
-  Future<List<String>> getLogs() async {
-    if (Platform.isAndroid || Platform.isIOS) {
-      try {
-        return await _flutterV2ray?.getLogs() ?? [];
-      } catch (e) {
-        print('[VpnService] Error getting logs: $e');
-        return [];
-      }
-    }
-    return [];
-  }
-
-  Future<bool> clearLogs() async {
-    if (Platform.isAndroid || Platform.isIOS) {
-      try {
-        return await _flutterV2ray?.clearLogs() ?? true;
-      } catch (e) {
-        print('[VpnService] Error clearing logs: $e');
-        return false;
-      }
-    }
-    return true;
-  }
-
-  /// Start custom WaledVpnService TUN -> SOCKS5 bridge (Android only)
-  Future<bool> startCustomTunnel({int socksPort = 10808, String socksHost = '127.0.0.1', String dnsServer = '1.1.1.1'}) async {
-    if (!Platform.isAndroid) return false;
+    if (!Platform.isAndroid) return true;
     try {
-      await _tunnelChannel.invokeMethod('startTunnel', {
-        'socksPort': socksPort,
-        'socksHost': socksHost,
-        'dnsServer': dnsServer,
-      });
-      return true;
+      return await _methodChannel.invokeMethod('prepare') ?? false;
     } catch (e) {
-      print('[VpnService] Error starting custom tunnel: $e');
+      print('[VpnService] prepare error: $e');
       return false;
     }
   }
 
-  /// Stop custom WaledVpnService
-  Future<void> stopCustomTunnel() async {
+  Future<bool> start({required String configJson}) async {
+    if (!Platform.isAndroid) return false;
+    try {
+      _state = VpnState.connecting;
+      _statusController.add(VpnStatus(state: _state, message: 'connecting'));
+      final result = await _methodChannel.invokeMethod('start', {
+        'config': configJson,
+      });
+      return result ?? false;
+    } catch (e) {
+      _state = VpnState.error;
+      _statusController.add(VpnStatus(state: _state, message: e.toString()));
+      print('[VpnService] start error: $e');
+      return false;
+    }
+  }
+
+  Future<void> stop() async {
     if (!Platform.isAndroid) return;
     try {
-      await _tunnelChannel.invokeMethod('stopTunnel');
+      await _methodChannel.invokeMethod('stop');
+      _state = VpnState.disconnected;
+      _statusController.add(VpnStatus(state: _state, message: 'disconnected'));
     } catch (e) {
-      print('[VpnService] Error stopping custom tunnel: $e');
+      print('[VpnService] stop error: $e');
     }
+  }
+
+  Future<bool> isConnected() async {
+    if (!Platform.isAndroid) return false;
+    try {
+      return await _methodChannel.invokeMethod('isConnected') ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  void dispose() {
+    _statusSub?.cancel();
+    _trafficSub?.cancel();
+    _statusController.close();
   }
 }

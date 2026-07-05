@@ -4,27 +4,23 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'package:flutter_v2ray_client/flutter_v2ray.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:WaledNet/data/servers.dart';
 import 'package:WaledNet/services/api_service.dart';
 import 'package:WaledNet/services/vpn_service.dart';
 import 'package:WaledNet/services/ad_service.dart';
 import 'package:WaledNet/services/speed_test_service.dart';
-import 'package:WaledNet/services/ssh_tunnel_service.dart';
-import 'package:WaledNet/services/windows_vpn_manager.dart';
-import 'package:WaledNet/services/url_parser_service.dart';
+import 'package:WaledNet/services/singbox_config_builder.dart';
 
 class VpnProvider with ChangeNotifier {
-  late final VpnService _vpnService;
+  final VpnService _vpnService = VpnService();
   late final AdService _adService;
   final SpeedTestService _speedTestService = SpeedTestService();
 
-  V2RayStatus? _status;
+  VpnState _vpnState = VpnState.disconnected;
   String _buttonText = 'اتصال';
   bool _isLoading = true;
   String _remark = '';
-  Map<String, dynamic> _config = {};
   List<VpnServer> _vpnServers = [];
   List<SniProfile> _sniProfiles = [];
   VpnServer? _selectedServer;
@@ -38,7 +34,6 @@ class VpnProvider with ChangeNotifier {
   bool _isRewardedAdReady = false;
   bool _isInterstitialAdReady = false;
   Timer? _adLoadTimer;
-  Timer? _logTimer;
   String _vpnStatus = 'DISCONNECTED';
   bool _isTestingSpeed = false;
   double? _speedTestResultMbps;
@@ -49,12 +44,13 @@ class VpnProvider with ChangeNotifier {
   bool _isConnectionVerified = false;
   bool _isConnectingUserTrigger = false;
   bool _hasPrintedIp = false;
-  bool _customTunnelStarted = false;
-  int _socksPort = 10808;
   bool _disposed = false;
+  int _uplink = 0;
+  int _downlink = 0;
 
-  // Getters
-  V2RayStatus? get status => _status;
+  VpnState get vpnState => _vpnState;
+  int get uplink => _uplink;
+  int get downlink => _downlink;
   String get buttonText => _buttonText;
   bool get isLoading => _isLoading;
   List<VpnServer> get vpnServers => _vpnServers;
@@ -73,9 +69,11 @@ class VpnProvider with ChangeNotifier {
   bool get isVerifyingConnection => _isVerifyingConnection;
   bool get isConnectionVerified => _isConnectionVerified;
   bool get isConnectingUserTrigger => _isConnectingUserTrigger;
+  int get socksProxyPort => 10808;
 
   VpnProvider() {
-    _vpnService = VpnService(onStatusChanged: _onStatusChanged);
+    _vpnService.initialize();
+    _vpnService.statusStream.listen(_onStatusChanged);
     _adService = AdService(
       onRewardedReadyChanged: (ready) {
         _isRewardedAdReady = ready;
@@ -103,84 +101,39 @@ class VpnProvider with ChangeNotifier {
     }
   }
 
-  void _onStatusChanged(V2RayStatus newStatus) {
-    final previousState = _vpnStatus;
-    _status = newStatus;
-    _vpnStatus = newStatus.state;
-    _updateButtonState();
+  void _onStatusChanged(VpnStatus status) {
+    _vpnState = status.state;
+    _uplink = status.uplink;
+    _downlink = status.downlink;
 
-    final newState = newStatus.state;
-    print('[_onStatusChanged] state: $previousState -> $newState');
-
-    if (newState == 'CONNECTED') {
-      _isConnectionVerified = true;
-      _isVerifyingConnection = false;
-      _isConnectingUserTrigger = false;
-      _logTimer?.cancel();
-      _logTimer = null;
-
-      if (previousState != 'CONNECTED') {
-        startTimer();
-        if (!_customTunnelStarted && Platform.isAndroid) {
-          _customTunnelStarted = true;
-          _vpnService.startCustomTunnel(socksPort: _socksPort);
-          print('[_onStatusChanged] Started custom VPN tunnel on SOCKS port $_socksPort');
+    switch (status.state) {
+      case VpnState.connected:
+        _vpnStatus = 'CONNECTED';
+        _buttonText = 'قطع الاتصال';
+        if (_vpnState != VpnState.connected) {
+          startTimer();
         }
-      }
-
-      if (!_hasPrintedIp) {
-        _hasPrintedIp = true;
-        Future.delayed(const Duration(seconds: 2), () async {
-          try {
-            final ip = await UrlParserService.fetchIpThroughProxy();
-            if (ip != null) {
-              print('[_onStatusChanged] VPN Public IP Address: {"ip":"$ip"}');
-            } else {
-              print('[_onStatusChanged] fetchIpThroughProxy failed - IP check through tunnel unavailable');
-            }
-          } catch (e) {
-            print('[_onStatusChanged] Failed to fetch VPN Public IP: $e');
-            _hasPrintedIp = false;
-          }
-        });
-      }
-    } else if (newState == 'DISCONNECTED') {
-      // Ignore stale DISCONNECTED broadcasts from previous process (cross-process delay)
-      if (previousState == 'CONNECTED') {
-        print('[_onStatusChanged] Ignoring DISCONNECTED while in CONNECTED state');
-        return;
-      }
-      _isConnectionVerified = false;
-      _isVerifyingConnection = false;
-      _isConnectingUserTrigger = false;
-      _isAdLoading = false;
-      _hasPrintedIp = false;
-      _customTunnelStarted = false;
-      _logTimer?.cancel();
-      _logTimer = null;
-      stopTimer();
-    } else {
-      _hasPrintedIp = false;
+        break;
+      case VpnState.connecting:
+        _vpnStatus = 'CONNECTING';
+        _buttonText = 'جاري الاتصال...';
+        break;
+      case VpnState.disconnected:
+        _vpnStatus = 'DISCONNECTED';
+        _buttonText = 'اتصال';
+        stopTimer();
+        break;
+      case VpnState.error:
+        _vpnStatus = 'DISCONNECTED';
+        _buttonText = 'اتصال';
+        stopTimer();
+        break;
     }
-
-    if (newState == 'CONNECTED') {
-      if (previousState != 'CONNECTED') {
-        _peakDownloadSpeedBps = 0;
-        _peakUploadSpeedBps = 0;
-      }
-      if ((newStatus.downloadSpeed ?? 0) > _peakDownloadSpeedBps) {
-        _peakDownloadSpeedBps = newStatus.downloadSpeed ?? 0;
-      }
-      if ((newStatus.uploadSpeed ?? 0) > _peakUploadSpeedBps) {
-        _peakUploadSpeedBps = newStatus.uploadSpeed ?? 0;
-      }
-    }
-
     notifyListeners();
   }
 
   void _handleAdFailed(String message) {
-    print('Unity Ads failure: $message');
+    print('Ad failure: $message');
     _isAdLoading = false;
     _isVerifyingConnection = false;
     _updateButtonState();
@@ -188,16 +141,12 @@ class VpnProvider with ChangeNotifier {
   }
 
   void _updateButtonState() {
-    final state = _status?.state ?? _vpnStatus;
-    switch (state) {
+    switch (_vpnStatus) {
       case 'CONNECTED':
         _buttonText = 'قطع الاتصال';
         break;
       case 'CONNECTING':
         _buttonText = 'جاري الاتصال...';
-        break;
-      case 'DISCONNECTED':
-        _buttonText = 'اتصال';
         break;
       default:
         _buttonText = 'اتصال';
@@ -208,7 +157,7 @@ class VpnProvider with ChangeNotifier {
   Future<void> initProvider() async {
     await _loadData();
     if (Platform.isAndroid || Platform.isIOS) {
-      await _initializeV2Ray();
+      _vpnService.initialize();
       _adService.initialize();
 
       FirebaseMessaging.instance.getToken().then((token) {
@@ -239,21 +188,6 @@ class VpnProvider with ChangeNotifier {
       if (servers.isNotEmpty && profiles.isNotEmpty) {
         _vpnServers = [
           ...servers,
-          VpnServer(
-            name: 'سيرفر تجربة SSH (SSL/TLS)',
-            url: 'ssh://esdgsdgre4y643:sgdgsdg434@76.13.39.204:443?ssl=true',
-            icon: 'assets/images/server.svg',
-          ),
-          VpnServer(
-            name: 'سيرفر SSH 2 (root)',
-            url: 'ssh://root:%3FAM.81%23Hs-LjVfG%3B%27P0f@187.127.107.105:443?ssl=true',
-            icon: 'assets/images/server.svg',
-          ),
-          // VpnServer(
-          //   name: 'سيرفر SSH 2',
-          //   url: 'ssh://d:d@187.124.43.15:443?ssl=true',
-          //   icon: 'assets/images/server.svg',
-          // ),
         ];
         _sniProfiles = profiles;
         await _saveDataToCache();
@@ -369,353 +303,66 @@ class VpnProvider with ChangeNotifier {
     }
   }
 
-  Future<void> _initializeV2Ray() async {
-    final originalUrl = _getFinalUrl();
-    final url = await UrlParserService.resolveUrlHost(originalUrl);
-    print("V2Ray/SSH - Final URL to initialize: $url");
-
-    if (_selectedServer == null || url.isEmpty) {
-      print("V2Ray initialization skipped: selected server is null or URL is invalid.");
+  Future<void> _connectToVpn() async {
+    if (_selectedServer == null) {
+      print('[_connectToVpn] No server selected');
       return;
     }
 
+    final hasPermission = await _vpnService.requestPermission();
+    if (!hasPermission) {
+      print('[_connectToVpn] VPN permission denied');
+      _vpnStatus = 'DISCONNECTED';
+      notifyListeners();
+      return;
+    }
+
+    final serverUrl = _selectedServer!.url;
+    final sni = _selectedProfile?.sni;
+    print('[_connectToVpn] Building sing-box config for: $serverUrl');
+    print('[_connectToVpn] SNI: $sni');
+
+    String configJson;
     try {
-      await _vpnService.initializeV2Ray();
-      if (url.startsWith('ssh://')) {
-        final sshParams = UrlParserService.parseSshUrl(url);
-        final String sshHost = sshParams?['host'] ?? '';
-        _remark = 'SSH Connection';
-        _config = UrlParserService.generateSocksV2rayConfig(sshHost);
-      } else {
-        final v2rayURL = await V2ray.parseFromURL(url);
-        _remark = v2rayURL.remark;
-        final configString = v2rayURL.getFullConfiguration();
-        if (configString != null) {
-          _config = jsonDecode(configString) as Map<String, dynamic>;
-        }
-      }
-      if (!url.startsWith('ssh://')) {
-        _config.remove('dns');
-      }
-      if (_selectedProfile != null && !url.startsWith('ssh://')) {
-        _removeAllowInsecure(_config);
-      }
+      configJson = SingboxConfigBuilder.build(
+        serverUrl: serverUrl,
+        sni: sni,
+      );
     } catch (e) {
-      print("Error initializing V2Ray: $e");
-    }
-    notifyListeners();
-  }
-
-  void _removeAllowInsecure(Map<String, dynamic> config) {
-    final outbounds = config['outbounds'] as List<dynamic>?;
-    if (outbounds == null) return;
-    for (final outbound in outbounds) {
-      final streamSettings = outbound['streamSettings'] as Map<String, dynamic>?;
-      if (streamSettings == null) continue;
-      final tlsSettings = streamSettings['tlsSettings'] as Map<String, dynamic>?;
-      if (tlsSettings != null) {
-        tlsSettings.remove('allowInsecure');
-      }
-      final realitySettings = streamSettings['realitySettings'] as Map<String, dynamic>?;
-      if (realitySettings != null) {
-        realitySettings.remove('allowInsecure');
-      }
-    }
-  }
-
-  String _getFinalUrl() {
-    if (_selectedServer == null) return '';
-    return UrlParserService.getFinalUrlForServer(_selectedServer!, _selectedProfile);
-  }
-
-  Future<List<String>?> _getBypassSubnets(String url) async {
-    final List<String> bypass = [
-      "127.0.0.0/8",
-      "10.0.0.0/8",
-      "172.16.0.0/12",
-      "192.168.0.0/16",
-    ];
-
-    if (url.startsWith('ssh://')) {
-      final sshParams = UrlParserService.parseSshUrl(url);
-      final String sshHost = sshParams?['host'] ?? '';
-      if (sshHost.isNotEmpty) {
-        try {
-          final isIp = InternetAddress.tryParse(sshHost) != null;
-          String sshIp;
-          if (isIp) {
-            sshIp = sshHost;
-          } else {
-            sshIp = await UrlParserService.resolveDomain(sshHost);
-          }
-          bypass.add("$sshIp/32");
-          print('[_getBypassSubnets] Added SSH host: $sshIp/32');
-        } catch (e) {
-          print('[_getBypassSubnets] Error resolving SSH host: $e');
-        }
-      }
+      print('[_connectToVpn] Config build error: $e');
+      _vpnStatus = 'DISCONNECTED';
+      notifyListeners();
+      return;
     }
 
-    print('[_getBypassSubnets] Final list: $bypass');
-    return bypass;
-  }
-
-  int _getSocksPort() {
-    final inbounds = _config['inbounds'] as List<dynamic>?;
-    if (inbounds != null) {
-      for (final inbound in inbounds) {
-        if (inbound is Map<String, dynamic> && inbound['protocol'] == 'socks') {
-          return inbound['port'] as int? ?? 10808;
-        }
-      }
-    }
-    return 10808;
-  }
-
-  Future<void> _connectToVpn() async {
-    // Cleanup any lingering connections before starting fresh
-    await _vpnService.stopV2Ray();
-    await SshTunnelService().stopTunnel();
-    _logTimer?.cancel();
-    _logTimer = null;
-
-    _isConnectingUserTrigger = true;
-    _vpnService.clearLogs();
+    _vpnStatus = 'CONNECTING';
+    _buttonText = 'جاري الاتصال...';
     notifyListeners();
 
-    final originalUrl = _getFinalUrl();
-    final url = await UrlParserService.resolveUrlHost(originalUrl);
-
-    bool hasPermission = true;
-    if (Platform.isAndroid || Platform.isIOS) {
-      hasPermission = await _vpnService.requestPermission();
-    }
-
-    if (hasPermission) {
-      _isExtendedConnection = true;
-      _connectionTime = 24 * 60 * 60;
-
-      if (Platform.isWindows) {
-        final ip = Uri.parse(url).host;
-        if (url.startsWith('ssh://')) {
-          final sshParams = UrlParserService.parseSshUrl(url);
-          if (sshParams == null) {
-            _isConnectingUserTrigger = false;
-            notifyListeners();
-            return;
-          }
-
-          try {
-            _isVerifyingConnection = true;
-            _buttonText = 'جاري الاتصال...';
-            notifyListeners();
-
-            await SshTunnelService().startTunnel(
-              host: sshParams['host'],
-              port: sshParams['port'],
-              username: sshParams['username'],
-              password: sshParams['password'],
-              useSsl: sshParams['useSsl'],
-              useWs: sshParams['useWs'],
-              wsPath: sshParams['wsPath'],
-              sni: _selectedProfile?.sni,
-              localPort: 10809,
-            );
-          } catch (e) {
-            _isConnectingUserTrigger = false;
-            _isVerifyingConnection = false;
-            _updateButtonState();
-            notifyListeners();
-            return;
-          }
-        }
-
-        final List<String>? bypassSubnets = await _getBypassSubnets(url);
-
-        await _vpnService.initializeV2Ray();
-        try {
-          await _vpnService.startV2Ray(
-            remark: url.startsWith('ssh://')
-                ? 'WaledNet SSH: متصل وآمن 🛡️'
-                : 'WaledNet VPN: متصل وآمن 🛡️',
-            config: jsonEncode(_config),
-            bypassSubnets: bypassSubnets,
-          );
-        } catch (e) {
-          print('[_connectToVpn] startV2Ray threw exception: $e');
-        }
-      } else {
-        // Android / iOS
-        print('[_connectToVpn] Starting connection process for Android/iOS');
-        final bool isSsh = url.startsWith('ssh://');
-        
-        print('[_connectToVpn] Resolving config details...');
-        await _initializeV2Ray();
-        print('[_connectToVpn] Done initializing config details. Config keys: ${_config.keys.toList()}');
-
-        // SSH tunnel after config is ready (before TUN starts)
-        if (isSsh) {
-          final sshParams = UrlParserService.parseSshUrl(url);
-          if (sshParams == null) {
-            print('[_connectToVpn] Failed to parse SSH URL');
-            _isConnectingUserTrigger = false;
-            notifyListeners();
-            return;
-          }
-          print('[_connectToVpn] Starting SSH tunnel...');
-          _isVerifyingConnection = true;
-          _buttonText = 'جاري الاتصال...';
-          notifyListeners();
-          try {
-            await SshTunnelService().startTunnel(
-              host: sshParams['host'],
-              port: sshParams['port'],
-              username: sshParams['username'],
-              password: sshParams['password'],
-              useSsl: sshParams['useSsl'],
-              useWs: sshParams['useWs'],
-              wsPath: sshParams['wsPath'],
-              sni: _selectedProfile?.sni,
-              localPort: 10809,
-            );
-            print('[_connectToVpn] SSH Tunnel started successfully.');
-          } catch (e) {
-            print('[_connectToVpn] SSH Tunnel failed: $e');
-            _isConnectingUserTrigger = false;
-            _isVerifyingConnection = false;
-            _updateButtonState();
-            notifyListeners();
-            return;
-          }
-        }
-
-        print('[_connectToVpn] Initializing native V2Ray service via VpnService...');
-        await _vpnService.initializeV2Ray();
-
-        // Set CONNECTING before startV2Ray so fallback timer can fire if plugin stream is broken
-        _vpnStatus = 'CONNECTING';
-        _buttonText = 'جاري الاتصال...';
-        notifyListeners();
-
-        try {
-          _socksPort = _getSocksPort();
-          print('[_connectToVpn] Starting V2Ray Core (proxyOnly=true). SOCKS port: $_socksPort');
-          await _vpnService.startV2Ray(
-            remark: isSsh
-                ? 'WaledNet_SSH'
-                : 'WaledNet_VPN',
-            config: jsonEncode(_config),
-            proxyOnly: true,
-            sshLocalPort: isSsh ? 10809 : -1,
-          );
-          print('[_connectToVpn] V2Ray start call sent successfully.');
-
-          // Force CONNECTED after 5s if still CONNECTING (plugin event or log detection may not fire)
-          Future.delayed(const Duration(seconds: 5), () {
-            if (_vpnStatus == 'CONNECTING') {
-              print('[_connectToVpn] Force CONNECTED after 5s fallback');
-              _onStatusChanged(V2RayStatus(
-                duration: '00:00:00',
-                uploadSpeed: 0,
-                downloadSpeed: 0,
-                upload: 0,
-                download: 0,
-                state: 'CONNECTED',
-              ));
-            }
-          });
-
-          // Auto-disconnect if still stuck on CONNECTING for 20s
-          Future.delayed(const Duration(seconds: 20), () async {
-            if (_vpnStatus == 'CONNECTING') {
-              print('[_connectToVpn] TIMEOUT: stuck on CONNECTING for 20s, disconnecting...');
-              await _vpnService.stopCustomTunnel();
-              await _vpnService.stopV2Ray();
-              await SshTunnelService().stopTunnel();
-              _logTimer?.cancel();
-              _logTimer = null;
-              _vpnStatus = 'DISCONNECTED';
-              _status = null;
-              _isConnectingUserTrigger = false;
-              _customTunnelStarted = false;
-              _updateButtonState();
-              notifyListeners();
-            }
-          });
-
-          // Test traffic routing 5s after V2Ray start
-          Future.delayed(const Duration(seconds: 5), () {
-            if (_vpnStatus == 'CONNECTED') {
-              print('[_connectToVpn] VPN Connected. Testing traffic routing...');
-              _testTrafficRouting();
-            }
-          });
-
-          _logTimer?.cancel();
-          _logTimer = Timer.periodic(const Duration(seconds: 2), (timer) async {
-            try {
-              final logs = await _vpnService.getLogs();
-              if (logs.isNotEmpty) {
-                print('--- [V2Ray Native Logs] ---');
-                for (var log in logs) {
-                  print('[XrayCore] $log');
-                  if (log.contains('core: Xray') &&
-                      log.contains('started')) {
-                    print('[_connectToVpn] Xray started detected! Setting CONNECTED state.');
-                    _onStatusChanged(V2RayStatus(
-                      duration: '00:00:00',
-                      uploadSpeed: 0,
-                      downloadSpeed: 0,
-                      upload: 0,
-                      download: 0,
-                      state: 'CONNECTED',
-                    ));
-                  }
-                }
-                print('---------------------------');
-              }
-            } catch (e) {
-              print('[_connectToVpn] Error fetching logs: $e');
-            }
-          });
-        } catch (e) {
-          print('[_connectToVpn] V2Ray start call threw exception: $e');
-        }
-      }
+    final success = await _vpnService.start(configJson: configJson);
+    if (success) {
+      print('[_connectToVpn] ✅ sing-box started');
+      _vpnStatus = 'CONNECTED';
+      _buttonText = 'قطع الاتصال';
     } else {
-      _isConnectingUserTrigger = false;
+      print('[_connectToVpn] ❌ sing-box failed to start');
+      _vpnStatus = 'DISCONNECTED';
+      _buttonText = 'اتصال';
     }
     notifyListeners();
   }
 
   Future<void> toggleVpn() async {
-    if (_status?.state == 'CONNECTED' || _vpnStatus == 'CONNECTED' || _vpnStatus == 'CONNECTING') {
-      if (Platform.isWindows) {
-        final originalUrl = _getFinalUrl();
-        final url = await UrlParserService.resolveUrlHost(originalUrl);
-        final ip = Uri.parse(url).host;
-        await WindowsVpnManager.stopVpn(ip);
-        await SshTunnelService().stopTunnel();
-        stopTimer();
-        _isConnectionVerified = false;
-        _isConnectingUserTrigger = false;
-        _vpnStatus = 'DISCONNECTED';
-        _status = null;
-        _updateButtonState();
-      } else {
-        await _vpnService.stopCustomTunnel();
-        await _vpnService.stopV2Ray();
-        await SshTunnelService().stopTunnel();
-        _logTimer?.cancel();
-        _logTimer = null;
-        _vpnStatus = 'DISCONNECTED';
-        _status = null;
-        _isConnectingUserTrigger = false;
-        _customTunnelStarted = false;
-        _updateButtonState();
-      }
+    if (_vpnStatus == 'CONNECTED' || _vpnStatus == 'CONNECTING') {
+      await _vpnService.stop();
+      _vpnStatus = 'DISCONNECTED';
+      _buttonText = 'اتصال';
+      stopTimer();
     } else {
       await _connectToVpn();
+      if (_vpnStatus == 'CONNECTED') {
+        startTimer();
+      }
     }
     notifyListeners();
   }
@@ -735,32 +382,6 @@ class VpnProvider with ChangeNotifier {
 
   void stopTimer() {
     _timer?.cancel();
-  }
-
-  Future<void> _testTrafficRouting() async {
-    print('[_testTrafficRouting] Testing if traffic routes through VPN...');
-
-    try {
-      final ip = await UrlParserService.fetchIpThroughProxy();
-      if (ip != null) {
-        print('[_testTrafficRouting] SOCKS5 direct: IP = $ip');
-      } else {
-        print('[_testTrafficRouting] SOCKS5 direct failed');
-      }
-    } catch (e) {
-      print('[_testTrafficRouting] SOCKS5 direct error: $e');
-    }
-
-    try {
-      final client = HttpClient();
-      client.connectionTimeout = const Duration(seconds: 10);
-      final request = await client.getUrl(Uri.parse('https://api.ipify.org?format=json'));
-      final response = await request.close();
-      final body = await response.transform(utf8.decoder).join();
-      print('[_testTrafficRouting] HTTP direct (simulating browser): $body');
-    } catch (e) {
-      print('[_testTrafficRouting] HTTP direct failed: $e');
-    }
   }
 
   Future<void> runSpeedTest() async {
@@ -787,49 +408,33 @@ class VpnProvider with ChangeNotifier {
     _isPingingServers = true;
     notifyListeners();
 
-    try {
-      await _vpnService.initializeV2Ray();
+    for (final server in _vpnServers) {
+      if (server.url.isEmpty ||
+          server.name == 'No Servers Available' ||
+          server.name == 'Loading...') continue;
 
-      for (final server in _vpnServers) {
-        if (server.url.isEmpty ||
-            server.name == 'No Servers Available' ||
-            server.name == 'Loading...') continue;
-
-        try {
-          final finalUrl = UrlParserService.getFinalUrlForServer(server, _selectedProfile);
-          if (finalUrl.startsWith('ssh://')) {
-            final sshParams = UrlParserService.parseSshUrl(finalUrl);
-            if (sshParams != null) {
-              final stopwatch = Stopwatch()..start();
-              final socket = await Socket.connect(
-                sshParams['host'],
-                sshParams['port'],
-                timeout: const Duration(seconds: 4),
-              );
-              stopwatch.stop();
-              socket.destroy();
-              _serverDelays[server.url] = stopwatch.elapsedMilliseconds;
-            }
-          } else {
-            final v2rayURL = await V2ray.parseFromURL(finalUrl);
-            final configString = v2rayURL.getFullConfiguration();
-            if (configString != null) {
-              final delay = await _vpnService.getServerDelay(config: configString);
-              _serverDelays[server.url] = delay;
-            }
-          }
-        } catch (e) {
-          _serverDelays[server.url] = -1;
+      try {
+        final stopwatch = Stopwatch()..start();
+        final uri = Uri.tryParse(server.url);
+        if (uri != null && uri.host.isNotEmpty) {
+          final socket = await Socket.connect(
+            uri.host,
+            uri.port != 0 ? uri.port : 443,
+            timeout: const Duration(seconds: 4),
+          );
+          stopwatch.stop();
+          socket.destroy();
+          _serverDelays[server.url] = stopwatch.elapsedMilliseconds;
         }
-        notifyListeners();
-        await Future.delayed(const Duration(milliseconds: 300));
+      } catch (e) {
+        _serverDelays[server.url] = -1;
       }
-    } catch (e) {
-      print('Error in _pingAllServers: $e');
-    } finally {
-      _isPingingServers = false;
       notifyListeners();
+      await Future.delayed(const Duration(milliseconds: 300));
     }
+
+    _isPingingServers = false;
+    notifyListeners();
   }
 
   void handleSelectionChange<T>(T? value) {
@@ -843,13 +448,11 @@ class VpnProvider with ChangeNotifier {
     notifyListeners();
 
     _saveSelections();
-    _initializeV2Ray().then((_) {
-      _isLoading = false;
-      notifyListeners();
-      if (value is SniProfile) {
-        pingAllServers();
-      }
-    });
+    _isLoading = false;
+    notifyListeners();
+    if (value is SniProfile) {
+      pingAllServers();
+    }
   }
 
   @override
@@ -857,7 +460,7 @@ class VpnProvider with ChangeNotifier {
     _disposed = true;
     _timer?.cancel();
     _adLoadTimer?.cancel();
-    _logTimer?.cancel();
+    _vpnService.dispose();
     super.dispose();
   }
 }
