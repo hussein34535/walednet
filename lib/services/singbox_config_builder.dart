@@ -5,8 +5,10 @@ class SingboxConfigBuilder {
     required String serverUrl,
     String? sni,
     String? sniProfileName,
+    int sshLocalPort = 10809,
   }) {
-    final outbound = _buildOutbound(serverUrl, sni);
+    final isSsh = serverUrl.startsWith('ssh://');
+    final outbound = _buildOutbound(serverUrl, sni, sshLocalPort);
     final config = {
       'log': {
         'level': 'info',
@@ -15,34 +17,13 @@ class SingboxConfigBuilder {
       'dns': {
         'servers': [
           {
-            'tag': 'remote',
-            'address': 'https://1.1.1.1/dns-query',
-            'address_resolver': 'local',
-            'detour': 'proxy',
-            'strategy': 'ipv4_only',
-          },
-          {
-            'tag': 'local',
-            'address': 'local',
-            'detour': 'direct',
-          },
-          {
-            'tag': 'fakeip',
-            'address': 'fakeip',
-            'strategy': 'ipv4_only',
+            'type': 'udp',
+            'tag': 'dns-remote',
+            'server': '1.1.1.1',
+            'server_port': 53,
           },
         ],
-        'rules': [
-          {
-            'query_type': ['A', 'AAAA'],
-            'server': 'fakeip',
-          },
-          {
-            'outbound': 'any',
-            'server': 'local',
-          },
-        ],
-        'final': 'remote',
+        'final': 'dns-remote',
         'strategy': 'ipv4_only',
         'independent_cache': true,
       },
@@ -51,22 +32,10 @@ class SingboxConfigBuilder {
           'type': 'tun',
           'tag': 'tun-in',
           'interface_name': 'tun0',
-          'address': [
-            '172.19.0.1/30',
-            'fdfe:dcba:9876::1/126',
-          ],
+          'address': '172.19.0.1/30',
           'mtu': 1500,
           'auto_route': true,
-          'strict_route': true,
-          'stack': 'system',
-          'dns_hijack': [
-            'tcp://any:53',
-            'udp://any:53',
-          ],
-          'sniff': {
-            'enabled': true,
-            'override_destination': true,
-          },
+          'stack': 'mixed',
           'platform': {
             'http_proxy': {
               'enabled': false,
@@ -84,24 +53,23 @@ class SingboxConfigBuilder {
           'type': 'block',
           'tag': 'block',
         },
-        {
-          'type': 'dns',
-          'tag': 'dns-out',
-        },
       ],
       'route': {
         'rules': [
           {
+            'action': 'sniff',
+          },
+          {
             'protocol': 'dns',
-            'outbound': 'dns-out',
+            'action': 'hijack-dns',
           },
           {
             'ip_is_private': true,
             'outbound': 'direct',
           },
         ],
-        'final': 'proxy',
         'auto_detect_interface': true,
+        'final': 'proxy',
       },
       'experimental': {
         'cache_file': {
@@ -114,17 +82,27 @@ class SingboxConfigBuilder {
     return jsonEncode(config);
   }
 
-  static Map<String, dynamic> _buildOutbound(String url, String? sni) {
+  static Map<String, dynamic> _buildOutbound(String url, String? sni, int sshLocalPort) {
     if (url.startsWith('vless://')) {
       return _buildVlessOutbound(url, sni);
     } else if (url.startsWith('vmess://')) {
       return _buildVmessOutbound(url, sni);
     } else if (url.startsWith('ssh://')) {
-      return _buildSshOutbound(url, sni);
+      return _buildSshSocksOutbound(sshLocalPort);
     } else if (url.startsWith('trojan://')) {
       return _buildTrojanOutbound(url, sni);
     }
     throw Exception('Unsupported protocol: $url');
+  }
+
+  static Map<String, dynamic> _buildSshSocksOutbound(int sshLocalPort) {
+    return {
+      'type': 'socks',
+      'tag': 'proxy',
+      'server': '127.0.0.1',
+      'server_port': sshLocalPort,
+      'version': '5',
+    };
   }
 
   static Map<String, dynamic> _buildVlessOutbound(String url, String? sni) {
@@ -147,7 +125,6 @@ class SingboxConfigBuilder {
       'server_port': port,
       'uuid': uuid,
       'flow': flow,
-      'network': type,
     };
 
     if (security == 'tls') {
@@ -223,7 +200,6 @@ class SingboxConfigBuilder {
       'uuid': uuid,
       'alter_id': aid,
       'security': 'auto',
-      'network': type,
     };
 
     if (security == 'tls') {
@@ -254,38 +230,6 @@ class SingboxConfigBuilder {
     return outbound;
   }
 
-  static Map<String, dynamic> _buildSshOutbound(String url, String? sni) {
-    final uri = Uri.parse(url);
-    final server = uri.host;
-    final port = uri.port != 0 ? uri.port : 22;
-    final username = Uri.decodeComponent(uri.userInfo.split(':')[0]);
-    final password = uri.userInfo.contains(':')
-        ? Uri.decodeComponent(uri.userInfo.split(':')[1])
-        : '';
-    final query = uri.queryParameters;
-    final useSsl = query['ssl'] == 'true';
-
-    final outbound = <String, dynamic>{
-      'type': 'ssh',
-      'tag': 'proxy',
-      'server': server,
-      'server_port': port,
-      'user': username,
-      'password': password,
-    };
-
-    if (useSsl) {
-      final serverName = sni ?? query['host'] ?? server;
-      outbound['tls'] = {
-        'enabled': true,
-        'server_name': serverName,
-        'insecure': true,
-      };
-    }
-
-    return outbound;
-  }
-
   static Map<String, dynamic> _buildTrojanOutbound(String url, String? sni) {
     final uri = Uri.parse(url);
     final password = Uri.decodeComponent(uri.userInfo);
@@ -301,7 +245,6 @@ class SingboxConfigBuilder {
       'server': server,
       'server_port': port,
       'password': password,
-      'network': type,
       'tls': {
         'enabled': true,
         'server_name': serverName,
@@ -322,5 +265,37 @@ class SingboxConfigBuilder {
     }
 
     return outbound;
+  }
+
+  static Map<String, dynamic>? parseSshUrl(String url) {
+    try {
+      if (!url.startsWith('ssh://')) return null;
+      final uri = Uri.parse(url);
+      final host = uri.host;
+      final port = uri.port != 0 ? uri.port : 22;
+      String username = '';
+      String password = '';
+      if (uri.userInfo.isNotEmpty) {
+        final idx = uri.userInfo.indexOf(':');
+        if (idx == -1) {
+          username = Uri.decodeComponent(uri.userInfo);
+        } else {
+          username = Uri.decodeComponent(uri.userInfo.substring(0, idx));
+          password = Uri.decodeComponent(uri.userInfo.substring(idx + 1));
+        }
+      }
+      final query = uri.queryParameters;
+      return {
+        'host': host,
+        'port': port,
+        'username': username,
+        'password': password,
+        'useSsl': query['ssl'] == 'true',
+        'sni': query['host'] ?? query['sni'] ?? '',
+      };
+    } catch (e) {
+      print('Error parsing SSH URL: $e');
+      return null;
+    }
   }
 }

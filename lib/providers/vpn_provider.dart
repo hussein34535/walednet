@@ -11,9 +11,12 @@ import 'package:WaledNet/services/vpn_service.dart';
 import 'package:WaledNet/services/ad_service.dart';
 import 'package:WaledNet/services/speed_test_service.dart';
 import 'package:WaledNet/services/singbox_config_builder.dart';
+import 'package:WaledNet/services/ssh_tunnel_service.dart';
 
 class VpnProvider with ChangeNotifier {
   final VpnService _vpnService = VpnService();
+  final SshTunnelService _sshTunnel = SshTunnelService();
+  static const int _sshLocalPort = 10809;
   late final AdService _adService;
   final SpeedTestService _speedTestService = SpeedTestService();
 
@@ -45,6 +48,7 @@ class VpnProvider with ChangeNotifier {
   bool _isConnectingUserTrigger = false;
   bool _hasPrintedIp = false;
   bool _disposed = false;
+  bool _initialized = false;
   int _uplink = 0;
   int _downlink = 0;
 
@@ -183,21 +187,36 @@ class VpnProvider with ChangeNotifier {
     try {
       print("[_loadData] Attempting to fetch new data from server...");
       final servers = await ApiService.fetchVlessServers();
+      final sshServers = await ApiService.fetchSshServers();
       final profiles = await ApiService.fetchSniProfiles();
 
       if (servers.isNotEmpty && profiles.isNotEmpty) {
         _vpnServers = [
           ...servers,
+          ...sshServers,
         ];
         _sniProfiles = profiles;
         await _saveDataToCache();
         await prefs.setInt('last_fetch_time', currentTime);
         print("[_loadData] Data fetched from API and saved to cache.");
         fetchedFromApi = true;
+      } else if (sshServers.isNotEmpty && profiles.isNotEmpty) {
+        _vpnServers = [...sshServers];
+        _sniProfiles = profiles;
+        await _saveDataToCache();
+        await prefs.setInt('last_fetch_time', currentTime);
+        print("[_loadData] SSH data only, saved to cache.");
+        fetchedFromApi = true;
       }
     } catch (e) {
       print("[_loadData] API fetch failed: $e");
     }
+
+    _vpnServers.add(VpnServer(
+      name: 'SSH User',
+      url: 'ssh://ajggdsg4:gsg43t436@168.231.110.144:443?ssl=true',
+      icon: 'assets/images/server.svg',
+    ));
 
     if (!fetchedFromApi) {
       print("[_loadData] Fetching from cache fallback...");
@@ -228,6 +247,7 @@ class VpnProvider with ChangeNotifier {
     await _loadSelections();
 
     _isLoading = false;
+    _initialized = true;
     notifyListeners();
   }
 
@@ -304,6 +324,11 @@ class VpnProvider with ChangeNotifier {
   }
 
   Future<void> _connectToVpn() async {
+    print('[_connectToVpn] CALLED BY: ${StackTrace.current}');
+    if (!_initialized) {
+      print('[_connectToVpn] Not initialized yet, skipping auto-connect');
+      return;
+    }
     if (_selectedServer == null) {
       print('[_connectToVpn] No server selected');
       return;
@@ -319,15 +344,48 @@ class VpnProvider with ChangeNotifier {
 
     final serverUrl = _selectedServer!.url;
     final sni = _selectedProfile?.sni;
-    print('[_connectToVpn] Building sing-box config for: $serverUrl');
-    print('[_connectToVpn] SNI: $sni');
+    final isSsh = serverUrl.startsWith('ssh://');
+
+    print('[_connectToVpn] Building config for: $serverUrl');
+    print('[_connectToVpn] SNI: $sni, isSSH: $isSsh');
+
+    if (isSsh) {
+      print('[_connectToVpn] Starting SSH-over-TLS tunnel...');
+      final sshParams = SingboxConfigBuilder.parseSshUrl(serverUrl);
+      if (sshParams == null) {
+        print('[_connectToVpn] Failed to parse SSH URL');
+        _vpnStatus = 'DISCONNECTED';
+        notifyListeners();
+        return;
+      }
+
+      try {
+        await _sshTunnel.startTunnel(
+          host: sshParams['host'],
+          port: sshParams['port'],
+          username: sshParams['username'],
+          password: sshParams['password'],
+          sni: sni ?? sshParams['sni'],
+          useSsl: sshParams['useSsl'],
+          localPort: _sshLocalPort,
+        );
+        print('[_connectToVpn] SSH tunnel ready on port $_sshLocalPort');
+      } catch (e) {
+        print('[_connectToVpn] SSH tunnel failed: $e');
+        _vpnStatus = 'DISCONNECTED';
+        notifyListeners();
+        return;
+      }
+    }
 
     String configJson;
     try {
       configJson = SingboxConfigBuilder.build(
         serverUrl: serverUrl,
         sni: sni,
+        sshLocalPort: _sshLocalPort,
       );
+      print('[_connectToVpn] Config JSON: $configJson');
     } catch (e) {
       print('[_connectToVpn] Config build error: $e');
       _vpnStatus = 'DISCONNECTED';
@@ -341,11 +399,14 @@ class VpnProvider with ChangeNotifier {
 
     final success = await _vpnService.start(configJson: configJson);
     if (success) {
-      print('[_connectToVpn] ✅ sing-box started');
+      print('[_connectToVpn] sing-box started');
       _vpnStatus = 'CONNECTED';
       _buttonText = 'قطع الاتصال';
     } else {
-      print('[_connectToVpn] ❌ sing-box failed to start');
+      print('[_connectToVpn] sing-box failed to start');
+      if (isSsh) {
+        await _sshTunnel.stopTunnel();
+      }
       _vpnStatus = 'DISCONNECTED';
       _buttonText = 'اتصال';
     }
@@ -355,12 +416,13 @@ class VpnProvider with ChangeNotifier {
   Future<void> toggleVpn() async {
     if (_vpnStatus == 'CONNECTED' || _vpnStatus == 'CONNECTING') {
       await _vpnService.stop();
+      await _sshTunnel.stopTunnel();
       _vpnStatus = 'DISCONNECTED';
       _buttonText = 'اتصال';
       stopTimer();
     } else {
       await _connectToVpn();
-      if (_vpnStatus == 'CONNECTED') {
+      if (_vpnStatus == 'CONNECTED' && _connectionTime > 0) {
         startTimer();
       }
     }
@@ -460,6 +522,7 @@ class VpnProvider with ChangeNotifier {
     _disposed = true;
     _timer?.cancel();
     _adLoadTimer?.cancel();
+    _sshTunnel.stopTunnel();
     _vpnService.dispose();
     super.dispose();
   }

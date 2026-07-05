@@ -5,6 +5,7 @@ import '../data/servers.dart';
 class ApiService {
   static const String _sniUrl = 'https://waledapis.vercel.app/api/sni';
   static const String _vlessUrl = 'https://waledapis.vercel.app/api/vless';
+  static const String _sshUrl = 'https://waledapis.vercel.app/api/ssh';
 
   static Future<List<SniProfile>> fetchSniProfiles() async {
     try {
@@ -12,7 +13,7 @@ class ApiService {
       if (response.statusCode == 200) {
         final String responseBody = utf8.decode(response.bodyBytes);
         final List<dynamic> data = jsonDecode(responseBody);
-        return data.map((json) => SniProfile.fromJson(json)).where((profile) => profile.sni.isNotEmpty).toList(); // Add filtering for empty SNI
+        return data.map((json) => SniProfile.fromJson(json)).where((profile) => profile.sni.isNotEmpty).toList();
       } else {
         throw Exception('Failed to load SNI profiles');
       }
@@ -37,6 +38,25 @@ class ApiService {
       }
     } catch (e) {
       print('Error fetching VLESS servers: $e');
+      return [];
+    }
+  }
+
+  static Future<List<VpnServer>> fetchSshServers() async {
+    try {
+      final response = await http.get(Uri.parse(_sshUrl));
+      if (response.statusCode == 200) {
+        final String responseBody = utf8.decode(response.bodyBytes);
+        final List<dynamic> data = jsonDecode(responseBody);
+        return data
+            .map((json) => VpnServer.fromJson(json))
+            .where((server) => server.url.isNotEmpty && server.url.startsWith('ssh://'))
+            .toList();
+      } else {
+        throw Exception('Failed to load SSH servers');
+      }
+    } catch (e) {
+      print('Error fetching SSH servers: $e');
       return [];
     }
   }

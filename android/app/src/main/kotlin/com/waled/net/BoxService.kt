@@ -354,7 +354,7 @@ class BoxService : VpnService(), PlatformInterface {
         sourcePort: Int,
         destAddress: String,
         destPort: Int
-    ): ConnectionOwner? = null
+    ): ConnectionOwner = ConnectionOwner()
 
     override fun localDNSTransport(): LocalDNSTransport? = null
     override fun registerMyInterface(name: String) {}
