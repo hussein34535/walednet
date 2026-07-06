@@ -11,6 +11,7 @@ import '../widgets/profile_bottom_sheet.dart';
 import '../widgets/connect_button.dart';
 import '../widgets/connection_status_card.dart';
 import '../services/windows_vpn_manager.dart';
+import 'logs_page.dart';
 
 class MyHomePage extends StatefulWidget {
   const MyHomePage({super.key});
@@ -81,19 +82,17 @@ class _MyHomePageState extends State<MyHomePage>
     final theme = themeProvider.themeData;
 
     final isConnected = vpnProvider.vpnStatus == 'CONNECTED' ||
-        vpnProvider.vpnStatus == 'CONNECTING' ||
-        vpnProvider.vpnStatus == 'CONNECTED' ||
-        vpnProvider.vpnStatus == 'CONNECTING' ||
-        vpnProvider.isVerifyingConnection ||
-        vpnProvider.isConnectingUserTrigger;
+        vpnProvider.vpnStatus == 'CONNECTING';
+
+    final isFullyConnected = vpnProvider.vpnStatus == 'CONNECTED';
 
     final bool isButtonLoading = vpnProvider.isLoading ||
         (vpnProvider.isAdLoading && !isConnected) ||
         (vpnProvider.vpnStatus == 'CONNECTING') ||
         vpnProvider.isVerifyingConnection;
 
-    // Control pulse animation based on status
-    if (isConnected || isButtonLoading) {
+    // Control pulse animation based on fully connected status only
+    if (isFullyConnected) {
       if (!_pulseController.isAnimating) {
         _pulseController.repeat(reverse: true);
       }
@@ -136,7 +135,7 @@ class _MyHomePageState extends State<MyHomePage>
                   children: [
                     SizedBox(height: topSpace),
                     ConnectButton(
-                      isConnected: isConnected,
+                      isConnected: isFullyConnected,
                       isButtonLoading: isButtonLoading,
                       isAdLoading: vpnProvider.isAdLoading,
                       buttonText: vpnProvider.buttonText,
@@ -273,6 +272,17 @@ class _MyHomePageState extends State<MyHomePage>
           icon: const Icon(Icons.telegram, color: Color(0xFF007AFF)),
           iconSize: 28,
           onPressed: () => _launchUrl(_telegramUrl),
+        ),
+        IconButton(
+          icon: const Icon(Icons.receipt_long_rounded),
+          iconSize: 26,
+          color: theme.iconTheme.color,
+          onPressed: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(builder: (context) => const LogsPage()),
+            );
+          },
         ),
         IconButton(
           icon: Icon(
@@ -434,6 +444,15 @@ class _MyHomePageState extends State<MyHomePage>
     final delay = vpnProvider.serverDelays[vpnProvider.selectedServer!.url];
     Color delayColor;
     String delayText;
+    
+    if (delay == null && vpnProvider.isPingingServers) {
+      return const SizedBox(
+        width: 16,
+        height: 16,
+        child: CircularProgressIndicator(strokeWidth: 2.0),
+      );
+    }
+
     if (delay == null) {
       delayText = '...';
       delayColor = Colors.grey;
@@ -449,14 +468,6 @@ class _MyHomePageState extends State<MyHomePage>
       } else {
         delayColor = const Color(0xFFFF3B30); // iOS Red
       }
-    }
-
-    if (vpnProvider.isPingingServers) {
-      return const SizedBox(
-        width: 16,
-        height: 16,
-        child: CircularProgressIndicator(strokeWidth: 2.0),
-      );
     }
 
     return Container(
@@ -477,6 +488,8 @@ class _MyHomePageState extends State<MyHomePage>
   }
 
   void _showServerBottomSheet(VpnProvider vpnProvider) {
+    // Refresh ping latency when opening the bottom sheet
+    vpnProvider.pingAllServers();
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,

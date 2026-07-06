@@ -39,7 +39,7 @@ class ConnectButton extends StatelessWidget {
           animation: pulseAnimation,
           builder: (context, child) {
             double scale = 1.0;
-            if (isConnected || isButtonLoading) {
+            if (isConnected) {
               scale = pulseAnimation.value;
             }
             return Stack(
@@ -53,14 +53,12 @@ class ConnectButton extends StatelessWidget {
                     shape: BoxShape.circle,
                     color: isConnected
                         ? activeColor.withOpacity(0.12)
-                        : isButtonLoading
-                            ? activeColor.withOpacity(0.06)
-                            : Colors.transparent,
+                        : Colors.transparent,
                   ),
                 ),
                 // Inner button
                 GestureDetector(
-                  onTap: isButtonLoading ? null : onTap,
+                  onTap: isConnected ? onTap : (isButtonLoading ? null : onTap),
                   child: AnimatedContainer(
                     duration: const Duration(milliseconds: 400),
                     width: 150,

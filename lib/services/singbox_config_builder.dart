@@ -9,6 +9,8 @@ class SingboxConfigBuilder {
   }) {
     final isSsh = serverUrl.startsWith('ssh://');
     final outbound = _buildOutbound(serverUrl, sni, sshLocalPort);
+    final serverHost = outbound['server'] as String?;
+
     final config = {
       'log': {
         'level': 'info',
@@ -17,15 +19,30 @@ class SingboxConfigBuilder {
       'dns': {
         'servers': [
           {
-            'type': 'udp',
-            'tag': 'dns-remote',
+            'tag': 'dns-proxy',
+            'type': 'tcp',
             'server': '1.1.1.1',
-            'server_port': 53,
+            'detour': 'proxy',
+          },
+          {
+            'tag': 'dns-direct',
+            'type': 'udp',
+            'server': '223.5.5.5',
           },
         ],
-        'final': 'dns-remote',
+        'rules': [
+          if (serverHost != null && serverHost != '127.0.0.1')
+            {
+              'domain': [serverHost],
+              'server': 'dns-direct',
+            },
+          {
+            'outbound': ['direct'],
+            'server': 'dns-direct',
+          },
+        ],
+        'final': 'dns-proxy',
         'strategy': 'ipv4_only',
-        'independent_cache': true,
       },
       'inbounds': [
         {
@@ -35,7 +52,7 @@ class SingboxConfigBuilder {
           'address': '172.19.0.1/30',
           'mtu': 1500,
           'auto_route': true,
-          'stack': 'mixed',
+          'stack': 'gvisor',
           'platform': {
             'http_proxy': {
               'enabled': false,
@@ -67,8 +84,19 @@ class SingboxConfigBuilder {
             'ip_is_private': true,
             'outbound': 'direct',
           },
+          // Block QUIC (UDP 443) to force fallback to TCP (HTTPS) which works over SSH
+          {
+            'port': [443],
+            'network': ['udp'],
+            'outbound': 'block',
+          },
+          // For SSH, since it doesn't support UDP proxying, route other UDP directly so apps don't hang
+          if (isSsh)
+            {
+              'network': ['udp'],
+              'outbound': 'direct',
+            },
         ],
-        'auto_detect_interface': true,
         'final': 'proxy',
       },
       'experimental': {
@@ -102,6 +130,7 @@ class SingboxConfigBuilder {
       'server': '127.0.0.1',
       'server_port': sshLocalPort,
       'version': '5',
+      'bind_interface': 'lo',
     };
   }
 
@@ -113,9 +142,13 @@ class SingboxConfigBuilder {
     final query = uri.queryParameters;
     final security = query['security'] ?? 'none';
     final type = query['type'] ?? 'tcp';
-    final serverName = sni ?? query['sni'] ?? query['host'] ?? server;
+    
+    // TLS SNI uses the whitelisted SNI if provided, otherwise the original SNI or host
+    final tlsSni = sni ?? query['sni'] ?? query['host'] ?? server;
+    
+    // WebSocket Host MUST be the original server domain, NOT the whitelisted SNI
+    final httpHost = query['host'] ?? query['sni'] ?? server;
     final path = query['path'] ?? '/';
-    final host = query['host'] ?? serverName;
     final flow = query['flow'];
 
     final outbound = <String, dynamic>{
@@ -130,7 +163,7 @@ class SingboxConfigBuilder {
     if (security == 'tls') {
       outbound['tls'] = {
         'enabled': true,
-        'server_name': serverName,
+        'server_name': tlsSni,
         'utls': {
           'enabled': true,
           'fingerprint': 'chrome',
@@ -140,7 +173,7 @@ class SingboxConfigBuilder {
     } else if (security == 'reality') {
       outbound['tls'] = {
         'enabled': true,
-        'server_name': serverName,
+        'server_name': tlsSni,
         'reality': {
           'enabled': true,
           'public_key': query['pbk'] ?? '',
@@ -157,7 +190,7 @@ class SingboxConfigBuilder {
       outbound['transport'] = {
         'type': 'ws',
         'path': path,
-        'headers': {'Host': host},
+        'headers': {'Host': httpHost},
       };
     } else if (type == 'grpc') {
       outbound['transport'] = {
@@ -167,7 +200,7 @@ class SingboxConfigBuilder {
     } else if (type == 'http') {
       outbound['transport'] = {
         'type': 'http',
-        'host': [host],
+        'host': [httpHost],
         'path': path,
       };
     }
@@ -188,9 +221,12 @@ class SingboxConfigBuilder {
     final aid = (json['aid'] ?? 0) as int;
     final security = json['tls'] ?? '';
     final type = json['net'] ?? 'tcp';
-    final serverName = sni ?? json['sni'] ?? json['host'] ?? server;
+    
+    // TLS SNI uses whitelisted SNI if provided, otherwise original SNI/host
+    final tlsSni = sni ?? json['sni'] ?? json['host'] ?? server;
+    // WebSocket Host MUST be the original server domain
+    final httpHost = json['host'] ?? json['sni'] ?? server;
     final path = json['path'] ?? '/';
-    final host = json['host'] ?? serverName;
 
     final outbound = <String, dynamic>{
       'type': 'vmess',
@@ -205,7 +241,7 @@ class SingboxConfigBuilder {
     if (security == 'tls') {
       outbound['tls'] = {
         'enabled': true,
-        'server_name': serverName,
+        'server_name': tlsSni,
         'utls': {
           'enabled': true,
           'fingerprint': 'chrome',
@@ -218,7 +254,7 @@ class SingboxConfigBuilder {
       outbound['transport'] = {
         'type': 'ws',
         'path': path,
-        'headers': {'Host': host},
+        'headers': {'Host': httpHost},
       };
     } else if (type == 'grpc') {
       outbound['transport'] = {
@@ -236,7 +272,11 @@ class SingboxConfigBuilder {
     final server = uri.host;
     final port = uri.port;
     final query = uri.queryParameters;
-    final serverName = sni ?? query['sni'] ?? server;
+    
+    // TLS SNI uses whitelisted SNI if provided, otherwise original SNI
+    final tlsSni = sni ?? query['sni'] ?? server;
+    // WebSocket Host MUST be the original server domain
+    final httpHost = query['host'] ?? query['sni'] ?? server;
     final type = query['type'] ?? 'tcp';
 
     final outbound = <String, dynamic>{
@@ -247,7 +287,7 @@ class SingboxConfigBuilder {
       'password': password,
       'tls': {
         'enabled': true,
-        'server_name': serverName,
+        'server_name': tlsSni,
         'utls': {
           'enabled': true,
           'fingerprint': 'chrome',
@@ -260,7 +300,7 @@ class SingboxConfigBuilder {
       outbound['transport'] = {
         'type': 'ws',
         'path': query['path'] ?? '/',
-        'headers': {'Host': query['host'] ?? serverName},
+        'headers': {'Host': httpHost},
       };
     }
 

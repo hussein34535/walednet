@@ -51,6 +51,8 @@ class VpnProvider with ChangeNotifier {
   bool _initialized = false;
   int _uplink = 0;
   int _downlink = 0;
+  bool _isSshReconnecting = false;
+  int _sshReconnectAttempt = 0;
 
   VpnState get vpnState => _vpnState;
   int get uplink => _uplink;
@@ -74,10 +76,67 @@ class VpnProvider with ChangeNotifier {
   bool get isConnectionVerified => _isConnectionVerified;
   bool get isConnectingUserTrigger => _isConnectingUserTrigger;
   int get socksProxyPort => 10808;
+  bool get isSshReconnecting => _isSshReconnecting;
+  int get sshReconnectAttempt => _sshReconnectAttempt;
+
+  Timer? _logNotifyTimer;
+  bool _logNotifyPending = false;
+
+  final List<String> _vpnLogs = [];
+  List<String> get vpnLogs => _vpnLogs;
+
+  void _addLog(String msg) {
+    if (_disposed) return;
+    final now = DateTime.now();
+    final timeStr = "${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}:${now.second.toString().padLeft(2, '0')}";
+    final line = "[$timeStr] $msg";
+    _vpnLogs.add(line);
+    if (_vpnLogs.length > 800) {
+      _vpnLogs.removeAt(0);
+    }
+    
+    // Throttle notifyListeners to prevent UI freezing due to high-frequency log updates
+    if (!_logNotifyPending) {
+      _logNotifyPending = true;
+      _logNotifyTimer = Timer(const Duration(milliseconds: 200), () {
+        _logNotifyPending = false;
+        notifyListeners();
+      });
+    }
+  }
+
+  void clearLogs() {
+    _vpnLogs.clear();
+    _addLog("Logs cleared.");
+    notifyListeners();
+  }
 
   VpnProvider() {
     _vpnService.initialize();
     _vpnService.statusStream.listen(_onStatusChanged);
+
+    // Listen to sing-box core logs
+    _vpnService.logStream.listen((logLine) {
+      _addLog('[Core] $logLine');
+    });
+
+    // ── SSH Tunnel Callbacks ──
+    _sshTunnel.onConnectionChanged = _onSshConnectionChanged;
+    _sshTunnel.onStatusUpdate = (msg) {
+      _addLog('[SSH] $msg');
+      if (msg.startsWith('reconnecting:')) {
+        _sshReconnectAttempt = int.tryParse(msg.split(':').last) ?? 0;
+        _isSshReconnecting = true;
+        notifyListeners();
+      } else if (msg == 'reconnect_failed') {
+        _isSshReconnecting = false;
+        _vpnStatus = 'DISCONNECTED';
+        _buttonText = 'اتصال';
+        stopTimer();
+        notifyListeners();
+      }
+    };
+
     _adService = AdService(
       onRewardedReadyChanged: (ready) {
         _isRewardedAdReady = ready;
@@ -98,6 +157,50 @@ class VpnProvider with ChangeNotifier {
     );
   }
 
+  Future<void> _onSshConnectionChanged(bool connected) async {
+    if (_disposed) return;
+    if (connected) {
+      if (!_isSshReconnecting) {
+        print('[VpnProvider] SSH tunnel connected initially, skipping auto-restart handler.');
+        return;
+      }
+      // الـ tunnel اتوصل من جديد — شغّل sing-box تاني
+      print('[VpnProvider] SSH tunnel reconnected — restarting sing-box');
+      _isSshReconnecting = false;
+      _sshReconnectAttempt = 0;
+      notifyListeners();
+
+      if (_selectedServer != null && _selectedServer!.url.startsWith('ssh://')) {
+        final sni = _selectedProfile?.sni;
+        try {
+          final configJson = SingboxConfigBuilder.build(
+            serverUrl: _selectedServer!.url,
+            sni: sni,
+            sshLocalPort: _sshLocalPort,
+          );
+          await _vpnService.stop();
+          await Future.delayed(const Duration(milliseconds: 500));
+          final ok = await _vpnService.start(configJson: configJson);
+          if (ok) {
+            _vpnStatus = 'CONNECTED';
+            _buttonText = 'قطع الاتصال';
+            notifyListeners();
+          }
+        } catch (e) {
+          print('[VpnProvider] Failed to restart sing-box after reconnect: $e');
+        }
+      }
+    } else {
+      // الـ tunnel انقطع — وقف sing-box مؤقتاً
+      print('[VpnProvider] SSH tunnel lost — pausing sing-box');
+      _isSshReconnecting = true;
+      _vpnStatus = 'CONNECTING';
+      _buttonText = 'إعادة الاتصال...';
+      notifyListeners();
+      await _vpnService.stop();
+    }
+  }
+
   @override
   void notifyListeners() {
     if (!_disposed) {
@@ -106,6 +209,7 @@ class VpnProvider with ChangeNotifier {
   }
 
   void _onStatusChanged(VpnStatus status) {
+    final oldState = _vpnState;
     _vpnState = status.state;
     _uplink = status.uplink;
     _downlink = status.downlink;
@@ -114,22 +218,29 @@ class VpnProvider with ChangeNotifier {
       case VpnState.connected:
         _vpnStatus = 'CONNECTED';
         _buttonText = 'قطع الاتصال';
-        if (_vpnState != VpnState.connected) {
+        _isConnectionVerified = true;
+        if (oldState != VpnState.connected) {
+          if (!_isExtendedConnection) {
+            _connectionTime = 0;
+          }
           startTimer();
         }
         break;
       case VpnState.connecting:
         _vpnStatus = 'CONNECTING';
         _buttonText = 'جاري الاتصال...';
+        _isConnectionVerified = false;
         break;
       case VpnState.disconnected:
         _vpnStatus = 'DISCONNECTED';
         _buttonText = 'اتصال';
+        _isConnectionVerified = false;
         stopTimer();
         break;
       case VpnState.error:
         _vpnStatus = 'DISCONNECTED';
         _buttonText = 'اتصال';
+        _isConnectionVerified = false;
         stopTimer();
         break;
     }
@@ -160,6 +271,9 @@ class VpnProvider with ChangeNotifier {
 
   Future<void> initProvider() async {
     await _loadData();
+    // Start pinging all servers in the background immediately after loading data
+    pingAllServers();
+    
     if (Platform.isAndroid || Platform.isIOS) {
       _vpnService.initialize();
       _adService.initialize();
@@ -212,15 +326,19 @@ class VpnProvider with ChangeNotifier {
       print("[_loadData] API fetch failed: $e");
     }
 
-    _vpnServers.add(VpnServer(
-      name: 'SSH User',
-      url: 'ssh://ajggdsg4:gsg43t436@168.231.110.144:443?ssl=true',
-      icon: 'assets/images/server.svg',
-    ));
-
     if (!fetchedFromApi) {
       print("[_loadData] Fetching from cache fallback...");
       await _loadDataFromCache();
+    }
+
+    // Always ensure the local SSH User server is added to the list, even when loading from cache fallback
+    final hasSshUser = _vpnServers.any((s) => s.name == 'SSH User');
+    if (!hasSshUser) {
+      _vpnServers.add(VpnServer(
+        name: 'SSH User',
+        url: 'ssh://ajggdsg4:gsg43t436@168.231.110.144:443?ssl=true',
+        icon: 'assets/images/server.svg',
+      ));
     }
 
     if (_vpnServers.isEmpty) {
@@ -324,21 +442,35 @@ class VpnProvider with ChangeNotifier {
   }
 
   Future<void> _connectToVpn() async {
+    _addLog('[System] Starting VPN connection process...');
     print('[_connectToVpn] CALLED BY: ${StackTrace.current}');
     if (!_initialized) {
-      print('[_connectToVpn] Not initialized yet, skipping auto-connect');
+      _addLog('[System] Error: Provider not initialized yet.');
       return;
     }
     if (_selectedServer == null) {
-      print('[_connectToVpn] No server selected');
+      _addLog('[System] Error: No server selected.');
       return;
     }
 
+    // Set status to CONNECTING immediately to give visual feedback to the user
+    _vpnStatus = 'CONNECTING';
+    _buttonText = 'جاري الاتصال...';
+    _isConnectionVerified = false;
+    notifyListeners();
+
+    _addLog('[System] Requesting Android VPN permissions...');
     final hasPermission = await _vpnService.requestPermission();
     if (!hasPermission) {
-      print('[_connectToVpn] VPN permission denied');
+      _addLog('[System] Error: Android VPN permission denied.');
       _vpnStatus = 'DISCONNECTED';
+      _buttonText = 'اتصال';
       notifyListeners();
+      return;
+    }
+
+    if (_vpnStatus != 'CONNECTING') {
+      _addLog('[System] Connection cancelled by user before setup.');
       return;
     }
 
@@ -346,20 +478,22 @@ class VpnProvider with ChangeNotifier {
     final sni = _selectedProfile?.sni;
     final isSsh = serverUrl.startsWith('ssh://');
 
-    print('[_connectToVpn] Building config for: $serverUrl');
-    print('[_connectToVpn] SNI: $sni, isSSH: $isSsh');
+    _addLog('[System] Selected Server: ${_selectedServer!.name}');
+    _addLog('[System] Selected SNI Profile: ${sni ?? "Direct / None"}');
 
     if (isSsh) {
-      print('[_connectToVpn] Starting SSH-over-TLS tunnel...');
+      _addLog('[System] SSH Tunnel mode detected. Parsing credentials...');
       final sshParams = SingboxConfigBuilder.parseSshUrl(serverUrl);
       if (sshParams == null) {
-        print('[_connectToVpn] Failed to parse SSH URL');
+        _addLog('[System] Error: Failed to parse SSH URL. Connection aborted.');
         _vpnStatus = 'DISCONNECTED';
+        _buttonText = 'اتصال';
         notifyListeners();
         return;
       }
 
       try {
+        _addLog('[System] Initiating SSH-over-TLS Tunnel...');
         await _sshTunnel.startTunnel(
           host: sshParams['host'],
           port: sshParams['port'],
@@ -369,42 +503,74 @@ class VpnProvider with ChangeNotifier {
           useSsl: sshParams['useSsl'],
           localPort: _sshLocalPort,
         );
-        print('[_connectToVpn] SSH tunnel ready on port $_sshLocalPort');
+        
+        if (_vpnStatus != 'CONNECTING') {
+          _addLog('[System] Connection cancelled by user during SSH connection phase.');
+          await _sshTunnel.stopTunnel();
+          return;
+        }
+        _addLog('[System] SSH Tunnel ready and listening on SOCKS5 port $_sshLocalPort');
       } catch (e) {
-        print('[_connectToVpn] SSH tunnel failed: $e');
+        if (_vpnStatus != 'CONNECTING') {
+          _addLog('[System] Connection was cancelled by user; ignoring SSH error.');
+          return;
+        }
+        _addLog('[System] Error: SSH Tunnel connection failed: $e');
         _vpnStatus = 'DISCONNECTED';
+        _buttonText = 'اتصال';
         notifyListeners();
         return;
       }
     }
 
+    if (_vpnStatus != 'CONNECTING') {
+      _addLog('[System] Connection cancelled by user before config building.');
+      if (isSsh) await _sshTunnel.stopTunnel();
+      return;
+    }
+
     String configJson;
     try {
+      _addLog('[System] Building sing-box config JSON...');
       configJson = SingboxConfigBuilder.build(
         serverUrl: serverUrl,
         sni: sni,
         sshLocalPort: _sshLocalPort,
       );
-      print('[_connectToVpn] Config JSON: $configJson');
+      _addLog('[System] Config JSON generated successfully.');
     } catch (e) {
-      print('[_connectToVpn] Config build error: $e');
+      _addLog('[System] Error: Config generation failed: $e');
       _vpnStatus = 'DISCONNECTED';
+      _buttonText = 'اتصال';
+      if (isSsh) await _sshTunnel.stopTunnel();
       notifyListeners();
       return;
     }
 
-    _vpnStatus = 'CONNECTING';
-    _buttonText = 'جاري الاتصال...';
-    notifyListeners();
+    if (_vpnStatus != 'CONNECTING') {
+      _addLog('[System] Connection cancelled by user before starting sing-box.');
+      if (isSsh) await _sshTunnel.stopTunnel();
+      return;
+    }
 
+    _addLog('[System] Starting sing-box service on Android...');
     final success = await _vpnService.start(configJson: configJson);
+    
+    if (_vpnStatus != 'CONNECTING') {
+      _addLog('[System] Connection cancelled by user after sing-box start. Stopping...');
+      await _vpnService.stop();
+      if (isSsh) await _sshTunnel.stopTunnel();
+      return;
+    }
+
     if (success) {
-      print('[_connectToVpn] sing-box started');
+      _addLog('[System] sing-box VPN started successfully.');
       _vpnStatus = 'CONNECTED';
       _buttonText = 'قطع الاتصال';
     } else {
-      print('[_connectToVpn] sing-box failed to start');
+      _addLog('[System] Error: sing-box failed to start.');
       if (isSsh) {
+        _addLog('[System] Stopping SSH Tunnel...');
         await _sshTunnel.stopTunnel();
       }
       _vpnStatus = 'DISCONNECTED';
@@ -415,29 +581,52 @@ class VpnProvider with ChangeNotifier {
 
   Future<void> toggleVpn() async {
     if (_vpnStatus == 'CONNECTED' || _vpnStatus == 'CONNECTING') {
-      await _vpnService.stop();
-      await _sshTunnel.stopTunnel();
+      _addLog('[System] User triggered disconnection. Stopping service...');
+      
+      // Update state and UI immediately for instant feedback
       _vpnStatus = 'DISCONNECTED';
       _buttonText = 'اتصال';
+      _isSshReconnecting = false;
+      _isConnectionVerified = false;
       stopTimer();
+      notifyListeners();
+
+      // Perform actual service shutdown in the background
+      try {
+        await _vpnService.stop();
+      } catch (e) {
+        _addLog('[System] Error stopping VPN: $e');
+      }
+      try {
+        await _sshTunnel.stopTunnel();
+      } catch (e) {
+        _addLog('[System] Error stopping SSH Tunnel: $e');
+      }
+      
+      _addLog('[System] Disconnected successfully.');
+      notifyListeners();
     } else {
       await _connectToVpn();
       if (_vpnStatus == 'CONNECTED' && _connectionTime > 0) {
         startTimer();
       }
     }
-    notifyListeners();
   }
 
   void startTimer() {
     _timer?.cancel();
     _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      if (_connectionTime > 0) {
-        _connectionTime--;
-        notifyListeners();
+      if (_isExtendedConnection) {
+        if (_connectionTime > 0) {
+          _connectionTime--;
+          notifyListeners();
+        } else {
+          _timer?.cancel();
+          toggleVpn();
+        }
       } else {
-        _timer?.cancel();
-        toggleVpn();
+        _connectionTime++;
+        notifyListeners();
       }
     });
   }

@@ -16,12 +16,14 @@ class VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         private const val METHOD_CHANNEL = "waled_net/vpn"
         private const val STATUS_EVENT_CHANNEL = "waled_net/status"
         private const val TRAFFIC_EVENT_CHANNEL = "waled_net/traffic"
+        private const val LOG_EVENT_CHANNEL = "waled_net/logs"
     }
 
     private var context: Context? = null
     private var methodChannel: MethodChannel? = null
     private var statusEventChannel: EventChannel? = null
     private var trafficEventChannel: EventChannel? = null
+    private var logEventChannel: EventChannel? = null
 
     override fun onAttachedToEngine(binding: FlutterPlugin.FlutterPluginBinding) {
         context = binding.applicationContext
@@ -52,6 +54,18 @@ class VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                 }
                 override fun onCancel(args: Any?) {
                     BoxService.trafficListener = null
+                }
+            })
+        }
+        logEventChannel = EventChannel(binding.binaryMessenger, LOG_EVENT_CHANNEL).apply {
+            setStreamHandler(object : EventChannel.StreamHandler {
+                override fun onListen(args: Any?, sink: EventChannel.EventSink) {
+                    BoxService.logListener = { logLine ->
+                        try { sink.success(logLine) } catch (_: Exception) {}
+                    }
+                }
+                override fun onCancel(args: Any?) {
+                    BoxService.logListener = null
                 }
             })
         }
@@ -123,12 +137,15 @@ class VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
         BoxService.statusListener = null
         BoxService.trafficListener = null
+        BoxService.logListener = null
         methodChannel?.setMethodCallHandler(null)
         methodChannel = null
         statusEventChannel?.setStreamHandler(null)
         statusEventChannel = null
         trafficEventChannel?.setStreamHandler(null)
         trafficEventChannel = null
+        logEventChannel?.setStreamHandler(null)
+        logEventChannel = null
         context = null
         Log.i(TAG, "VpnPlugin detached")
     }

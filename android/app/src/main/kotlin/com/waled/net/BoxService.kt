@@ -140,28 +140,43 @@ class BoxService : VpnService(), PlatformInterface {
         override fun setDefaultLogLevel(level: Int) {}
     }
 
+    private fun startForegroundCompat(notification: Notification) {
+        if (Build.VERSION.SDK_INT >= 34) {
+            startForeground(
+                NOTIFICATION_ID,
+                notification,
+                android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+            )
+        } else {
+            startForeground(NOTIFICATION_ID, notification)
+        }
+    }
+
     override fun onCreate() {
         super.onCreate()
         instance = this
         createNotificationChannel()
         Log.i(TAG, "BoxService (VpnService) created")
+        try {
+            startForegroundCompat(buildNotification("Initializing..."))
+        } catch (e: Exception) {
+            Log.e(TAG, "startForeground in onCreate failed: ${e.message}", e)
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         Log.i(TAG, "onStartCommand: action=${intent?.action}")
 
+        try {
+            startForegroundCompat(buildNotification("Starting..."))
+        } catch (e: Exception) {
+            Log.e(TAG, "startForeground in onStartCommand failed: ${e.message}", e)
+        }
+
         when (intent?.action) {
             ACTION_START -> {
                 val config = intent.getStringExtra(EXTRA_CONFIG) ?: ""
                 if (config.isNotEmpty()) {
-                    try {
-                        startForeground(NOTIFICATION_ID, buildNotification("Starting..."))
-                        Log.i(TAG, "startForeground called")
-                    } catch (e: Exception) {
-                        Log.e(TAG, "startForeground failed: ${e.message}")
-                        stopSelf()
-                        return START_NOT_STICKY
-                    }
                     startVPN(config)
                 }
             }
@@ -277,10 +292,32 @@ class BoxService : VpnService(), PlatformInterface {
             }
 
             val inet4route = options.inet4RouteAddress
+            var hasGlobalRoute = false
             while (inet4route.hasNext()) {
                 val r = inet4route.next()
                 builder.addRoute(r.address(), r.prefix())
                 Log.d(TAG, "  Route: ${r.address()}/${r.prefix()}")
+                if (r.address() == "0.0.0.0" && r.prefix() == 0) {
+                    hasGlobalRoute = true
+                }
+            }
+
+            // Force add global IPv4 route if not present
+            if (!hasGlobalRoute) {
+                try {
+                    builder.addRoute("0.0.0.0", 0)
+                    Log.i(TAG, "  Forced default IPv4 Route: 0.0.0.0/0")
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to add forced default IPv4 route: ${e.message}")
+                }
+            }
+
+            // Add default global IPv6 route as well for completeness
+            try {
+                builder.addRoute("::", 0)
+                Log.i(TAG, "  Added default IPv6 Route: ::/0")
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to add default IPv6 route: ${e.message}")
             }
 
             val dnsServers = options.dnsServerAddress
@@ -381,7 +418,7 @@ class BoxService : VpnService(), PlatformInterface {
         lastStatus = text
         if (isRunning) {
             try {
-                startForeground(NOTIFICATION_ID, buildNotification(text))
+                startForegroundCompat(buildNotification(text))
             } catch (_: Exception) {}
         }
     }

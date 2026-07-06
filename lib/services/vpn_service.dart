@@ -28,6 +28,7 @@ class VpnService {
   static const _methodChannel = MethodChannel('waled_net/vpn');
   static const _statusEventChannel = EventChannel('waled_net/status');
   static const _trafficEventChannel = EventChannel('waled_net/traffic');
+  static const _logEventChannel = EventChannel('waled_net/logs');
 
   static final VpnService _instance = VpnService._internal();
   factory VpnService() => _instance;
@@ -36,11 +37,15 @@ class VpnService {
   final _statusController = StreamController<VpnStatus>.broadcast();
   Stream<VpnStatus> get statusStream => _statusController.stream;
 
+  final _logController = StreamController<String>.broadcast();
+  Stream<String> get logStream => _logController.stream;
+
   VpnState _state = VpnState.disconnected;
   VpnState get state => _state;
 
   StreamSubscription? _statusSub;
   StreamSubscription? _trafficSub;
+  StreamSubscription? _logSub;
 
   void initialize() {
     _statusSub = _statusEventChannel.receiveBroadcastStream().listen((data) {
@@ -58,6 +63,12 @@ class VpnService {
           downlink: downlink.toInt(),
         ));
       }
+    });
+
+    _logSub = _logEventChannel.receiveBroadcastStream().listen((data) {
+      _logController.add(data.toString());
+    }, onError: (err) {
+      _logController.add('Log Error: $err');
     });
   }
 
@@ -124,6 +135,8 @@ class VpnService {
   void dispose() {
     _statusSub?.cancel();
     _trafficSub?.cancel();
+    _logSub?.cancel();
     _statusController.close();
+    _logController.close();
   }
 }
