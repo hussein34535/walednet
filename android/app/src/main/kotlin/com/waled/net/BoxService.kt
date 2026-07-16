@@ -9,28 +9,26 @@ import android.net.VpnService
 import android.os.Build
 import android.os.ParcelFileDescriptor
 import android.util.Log
-import io.nekohasekai.libbox.CommandClient
-import io.nekohasekai.libbox.CommandClientHandler
-import io.nekohasekai.libbox.CommandClientOptions
-import io.nekohasekai.libbox.CommandServer
-import io.nekohasekai.libbox.CommandServerHandler
-import io.nekohasekai.libbox.Libbox
-import io.nekohasekai.libbox.Notification as LibboxNotification
-import io.nekohasekai.libbox.OverrideOptions
-import io.nekohasekai.libbox.SetupOptions
-import io.nekohasekai.libbox.StatusMessage
-import io.nekohasekai.libbox.StringIterator
-import io.nekohasekai.libbox.SystemProxyStatus
-import io.nekohasekai.libbox.TunOptions
-import io.nekohasekai.libbox.PlatformInterface
-import io.nekohasekai.libbox.ConnectionOwner
-import io.nekohasekai.libbox.InterfaceUpdateListener
-import io.nekohasekai.libbox.LocalDNSTransport
-import io.nekohasekai.libbox.NeighborUpdateListener
-import io.nekohasekai.libbox.NetworkInterfaceIterator
-import io.nekohasekai.libbox.PlatformUser
-import io.nekohasekai.libbox.ShellSession
-import io.nekohasekai.libbox.WIFIState
+import libbox.CommandClient
+import libbox.CommandClientHandler
+import libbox.CommandClientOptions
+import libbox.CommandServer
+import libbox.CommandServerHandler
+import libbox.Libbox
+import libbox.Notification as LibboxNotification
+import libbox.OverrideOptions
+import libbox.SetupOptions
+import libbox.StatusMessage
+import libbox.StringIterator
+import libbox.SystemProxyStatus
+import libbox.TunOptions
+import libbox.PlatformInterface
+import libbox.ConnectionOwner
+import libbox.InterfaceUpdateListener
+import libbox.LocalDNSTransport
+import libbox.NeighborUpdateListener
+import libbox.NetworkInterfaceIterator
+import libbox.WIFIState
 import java.io.File
 
 class BoxService : VpnService(), PlatformInterface {
@@ -94,8 +92,6 @@ class BoxService : VpnService(), PlatformInterface {
         override fun writeDebugMessage(message: String) {
             Log.d(TAG, "debug: $message")
         }
-
-        override fun connectSSHAgent(): Int = -1
     }
 
     private val clientHandler = object : CommandClientHandler {
@@ -120,10 +116,11 @@ class BoxService : VpnService(), PlatformInterface {
             trafficListener?.invoke(status.uplink, status.downlink)
         }
 
-        override fun writeLogs(it: io.nekohasekai.libbox.LogIterator) {
+        override fun writeLogs(it: libbox.LogIterator) {
             try {
                 while (it.hasNext()) {
                     val entry = it.next() ?: continue
+                    Log.i(TAG, "[Core] ${entry.message}")
                     logListener?.invoke(entry.message)
                 }
             } catch (e: Exception) {
@@ -131,9 +128,9 @@ class BoxService : VpnService(), PlatformInterface {
             }
         }
 
-        override fun writeOutbounds(it: io.nekohasekai.libbox.OutboundGroupItemIterator) {}
-        override fun writeGroups(it: io.nekohasekai.libbox.OutboundGroupIterator) {}
-        override fun writeConnectionEvents(it: io.nekohasekai.libbox.ConnectionEvents) {}
+        override fun writeOutbounds(it: libbox.OutboundGroupItemIterator) {}
+        override fun writeGroups(it: libbox.OutboundGroupIterator) {}
+        override fun writeConnectionEvents(it: libbox.ConnectionEvents) {}
         override fun initializeClashMode(it: StringIterator, current: String) {}
         override fun updateClashMode(mode: String) {}
         override fun clearLogs() {}
@@ -320,11 +317,13 @@ class BoxService : VpnService(), PlatformInterface {
                 Log.w(TAG, "Failed to add default IPv6 route: ${e.message}")
             }
 
-            val dnsServers = options.dnsServerAddress
-            while (dnsServers.hasNext()) {
-                val dns = dnsServers.next()
-                builder.addDnsServer(dns)
-                Log.d(TAG, "  DNS: $dns")
+            val dnsServer = options.dnsServerAddress
+            if (dnsServer != null) {
+                val dns = dnsServer.value
+                if (!dns.isNullOrEmpty()) {
+                    builder.addDnsServer(dns)
+                    Log.d(TAG, "  DNS: $dns")
+                }
             }
 
             builder.addDisallowedApplication(packageName)
@@ -380,8 +379,6 @@ class BoxService : VpnService(), PlatformInterface {
     override fun underNetworkExtension(): Boolean = false
     override fun includeAllNetworks(): Boolean = false
     override fun usePlatformAutoDetectInterfaceControl(): Boolean = true
-    override fun usePlatformShell(): Boolean = false
-    override fun checkPlatformShell() {}
     override fun getInterfaces(): NetworkInterfaceIterator? = null
     override fun readWIFIState(): WIFIState? = null
 
@@ -399,20 +396,7 @@ class BoxService : VpnService(), PlatformInterface {
     override fun closeDefaultInterfaceMonitor(listener: InterfaceUpdateListener) {}
     override fun startNeighborMonitor(listener: NeighborUpdateListener) {}
     override fun closeNeighborMonitor(listener: NeighborUpdateListener) {}
-    override fun lookupUser(username: String): PlatformUser? = null
-
-    override fun openShellSession(
-        user: PlatformUser,
-        command: String,
-        args: StringIterator,
-        term: String,
-        rows: Int,
-        cols: Int
-    ): ShellSession? = null
-
-    override fun lookupSFTPServer(): String = ""
-    override fun readSystemSSHHostKey(): String = ""
-    override fun tailscaleHostname(): String = ""
+    override fun systemCertificates(): StringIterator? = null
 
     fun updateNotification(text: String) {
         lastStatus = text

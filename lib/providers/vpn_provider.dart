@@ -12,6 +12,7 @@ import 'package:WaledNet/services/ad_service.dart';
 import 'package:WaledNet/services/speed_test_service.dart';
 import 'package:WaledNet/services/singbox_config_builder.dart';
 import 'package:WaledNet/services/ssh_tunnel_service.dart';
+import 'package:WaledNet/services/windows_vpn_manager.dart';
 
 class VpnProvider with ChangeNotifier {
   final VpnService _vpnService = VpnService();
@@ -38,6 +39,7 @@ class VpnProvider with ChangeNotifier {
   bool _isInterstitialAdReady = false;
   Timer? _adLoadTimer;
   String _vpnStatus = 'DISCONNECTED';
+  DateTime? _lastToggleTime;
   bool _isTestingSpeed = false;
   double? _speedTestResultMbps;
   double? _uploadSpeedTestResultMbps;
@@ -66,6 +68,8 @@ class VpnProvider with ChangeNotifier {
   int get connectionTime => _connectionTime;
   bool get isExtendedConnection => _isExtendedConnection;
   bool get isAdLoading => _isAdLoading;
+  bool get isRewardedAdReady => _isRewardedAdReady;
+  bool get isInterstitialAdReady => _isInterstitialAdReady;
   String get vpnStatus => _vpnStatus;
   bool get isTestingSpeed => _isTestingSpeed;
   double? get speedTestResultMbps => _speedTestResultMbps;
@@ -90,15 +94,17 @@ class VpnProvider with ChangeNotifier {
     final now = DateTime.now();
     final timeStr = "${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}:${now.second.toString().padLeft(2, '0')}";
     final line = "[$timeStr] $msg";
+    print(line);
     _vpnLogs.add(line);
     if (_vpnLogs.length > 800) {
       _vpnLogs.removeAt(0);
     }
     
-    // Throttle notifyListeners to prevent UI freezing due to high-frequency log updates
-    if (!_logNotifyPending) {
+    // Throttle notifyListeners to prevent UI freezing due to high-frequency log updates.
+    // Avoid notifying log updates during active connection phase to keep the spinner extremely smooth.
+    if (!_logNotifyPending && _vpnStatus != 'CONNECTING') {
       _logNotifyPending = true;
-      _logNotifyTimer = Timer(const Duration(milliseconds: 200), () {
+      _logNotifyTimer = Timer(const Duration(milliseconds: 250), () {
         _logNotifyPending = false;
         notifyListeners();
       });
@@ -112,13 +118,15 @@ class VpnProvider with ChangeNotifier {
   }
 
   VpnProvider() {
-    _vpnService.initialize();
-    _vpnService.statusStream.listen(_onStatusChanged);
+    if (Platform.isAndroid || Platform.isIOS) {
+      _vpnService.initialize();
+      _vpnService.statusStream.listen(_onStatusChanged);
 
-    // Listen to sing-box core logs
-    _vpnService.logStream.listen((logLine) {
-      _addLog('[Core] $logLine');
-    });
+      // Listen to sing-box core logs
+      _vpnService.logStream.listen((logLine) {
+        _addLog('[Core] $logLine');
+      });
+    }
 
     // ── SSH Tunnel Callbacks ──
     _sshTunnel.onConnectionChanged = _onSshConnectionChanged;
@@ -291,6 +299,11 @@ class VpnProvider with ChangeNotifier {
     }
   }
 
+  Future<void> refreshData() async {
+    await _loadData();
+    notifyListeners();
+  }
+
   Future<void> _loadData() async {
     final prefs = await SharedPreferences.getInstance();
     final currentTime = DateTime.now().millisecondsSinceEpoch;
@@ -301,26 +314,33 @@ class VpnProvider with ChangeNotifier {
     try {
       print("[_loadData] Attempting to fetch new data from server...");
       final servers = await ApiService.fetchVlessServers();
+      final vmessServers = await ApiService.fetchVmessServers();
       final sshServers = await ApiService.fetchSshServers();
+      final slowDnsServers = await ApiService.fetchSlowDnsServers();
       final profiles = await ApiService.fetchSniProfiles();
 
-      if (servers.isNotEmpty && profiles.isNotEmpty) {
+      // Robustly set whatever data we successfully fetched
+      if (servers.isNotEmpty || vmessServers.isNotEmpty || sshServers.isNotEmpty || slowDnsServers.isNotEmpty) {
         _vpnServers = [
           ...servers,
+          ...vmessServers,
           ...sshServers,
+          ...slowDnsServers,
         ];
-        _sniProfiles = profiles;
+        fetchedFromApi = true;
+      }
+      if (profiles.isNotEmpty) {
+        _sniProfiles = [
+          SniProfile(name: 'Direct / None (بدون SNI)', sni: ''),
+          ...profiles,
+        ];
+        fetchedFromApi = true;
+      }
+
+      if (fetchedFromApi) {
         await _saveDataToCache();
         await prefs.setInt('last_fetch_time', currentTime);
         print("[_loadData] Data fetched from API and saved to cache.");
-        fetchedFromApi = true;
-      } else if (sshServers.isNotEmpty && profiles.isNotEmpty) {
-        _vpnServers = [...sshServers];
-        _sniProfiles = profiles;
-        await _saveDataToCache();
-        await prefs.setInt('last_fetch_time', currentTime);
-        print("[_loadData] SSH data only, saved to cache.");
-        fetchedFromApi = true;
       }
     } catch (e) {
       print("[_loadData] API fetch failed: $e");
@@ -331,15 +351,7 @@ class VpnProvider with ChangeNotifier {
       await _loadDataFromCache();
     }
 
-    // Always ensure the local SSH User server is added to the list, even when loading from cache fallback
-    final hasSshUser = _vpnServers.any((s) => s.name == 'SSH User');
-    if (!hasSshUser) {
-      _vpnServers.add(VpnServer(
-        name: 'SSH User',
-        url: 'ssh://ajggdsg4:gsg43t436@168.231.110.144:443?ssl=true',
-        icon: 'assets/images/server.svg',
-      ));
-    }
+
 
     if (_vpnServers.isEmpty) {
       _vpnServers = [
@@ -350,13 +362,10 @@ class VpnProvider with ChangeNotifier {
         )
       ];
     }
-    if (_sniProfiles.isEmpty) {
+    if (_sniProfiles.length <= 1) {
       _sniProfiles = [
-        SniProfile(
-          name: 'No SNI Available',
-          sni: '',
-          icon: 'assets/images/server.svg',
-        )
+        SniProfile(name: 'Direct / None (بدون SNI)', sni: ''),
+        ...allSniProfiles,
       ];
     }
 
@@ -389,7 +398,12 @@ class VpnProvider with ChangeNotifier {
       final List<dynamic> profilesList = jsonDecode(profilesStr);
 
       _vpnServers = serversList.map((s) => VpnServer.fromJson(s)).toList();
-      _sniProfiles = profilesList.map((p) => SniProfile.fromJson(p)).toList();
+      final profiles = profilesList.map((p) => SniProfile.fromJson(p)).toList();
+      final hasDirect = profiles.any((p) => p.sni.isEmpty);
+      _sniProfiles = hasDirect ? profiles : [
+        SniProfile(name: 'Direct / None (بدون SNI)', sni: ''),
+        ...profiles,
+      ];
       print("[_loadDataFromCache] Loaded data from cache successfully.");
     }
   }
@@ -442,6 +456,10 @@ class VpnProvider with ChangeNotifier {
   }
 
   Future<void> _connectToVpn() async {
+    if (_vpnStatus == 'CONNECTING' || _vpnStatus == 'CONNECTED') {
+      print('[_connectToVpn] Already connecting/connected. Ignoring duplicate request.');
+      return;
+    }
     _addLog('[System] Starting VPN connection process...');
     print('[_connectToVpn] CALLED BY: ${StackTrace.current}');
     if (!_initialized) {
@@ -478,6 +496,125 @@ class VpnProvider with ChangeNotifier {
     final sni = _selectedProfile?.sni;
     final isSsh = serverUrl.startsWith('ssh://');
 
+    String? resolvedIp;
+    final host = SingboxConfigBuilder.getServerHost(serverUrl);
+    if (host != null && host.isNotEmpty) {
+      final isIp = RegExp(r'^\d+\.\d+\.\d+\.\d+$').hasMatch(host) || host.contains(':');
+      if (!isIp) {
+        try {
+          _addLog('[System] Resolving server hostname: $host...');
+          final addresses = await InternetAddress.lookup(host).timeout(const Duration(seconds: 5));
+          if (addresses.isNotEmpty) {
+            resolvedIp = addresses.first.address;
+            _addLog('[System] Host resolved to IP: $resolvedIp');
+          }
+        } catch (e) {
+          _addLog('[System] Warning: Hostname resolution failed: $e. Falling back to domain name.');
+        }
+      } else {
+        resolvedIp = host;
+      }
+    }
+
+
+
+    if (Platform.isWindows) {
+      _addLog('[System] Selected Server: ${_selectedServer!.name}');
+      _addLog('[System] Selected SNI Profile: ${sni ?? "Direct / None"}');
+
+      if (isSsh) {
+        _addLog('[System] SSH Tunnel mode detected. Parsing credentials...');
+        final sshParams = SingboxConfigBuilder.parseSshUrl(serverUrl);
+        if (sshParams == null) {
+          _addLog('[System] Error: Failed to parse SSH URL. Connection aborted.');
+          _vpnStatus = 'DISCONNECTED';
+          _buttonText = 'اتصال';
+          notifyListeners();
+          return;
+        }
+
+        try {
+          _addLog('[System] Initiating SSH-over-TLS Tunnel...');
+          await _sshTunnel.startTunnel(
+            host: sshParams['host'],
+            port: sshParams['port'],
+            username: sshParams['username'],
+            password: sshParams['password'],
+            sni: sni ?? sshParams['sni'],
+            useSsl: sshParams['useSsl'],
+            localPort: _sshLocalPort,
+          );
+          
+          if (_vpnStatus != 'CONNECTING') {
+            _addLog('[System] Connection cancelled by user during SSH connection phase.');
+            await _sshTunnel.stopTunnel();
+            return;
+          }
+          _addLog('[System] SSH Tunnel ready and listening on SOCKS5 port $_sshLocalPort');
+          
+          _addLog('[System] Starting Windows VPN routing via tun2socks...');
+          try {
+            await WindowsVpnManager.startVpn(
+              type: 'ssh',
+              serverIp: resolvedIp ?? sshParams['host'],
+            );
+            _addLog('[System] Windows VPN routing started successfully.');
+            _vpnStatus = 'CONNECTED';
+            _buttonText = 'قطع الاتصال';
+            _isConnectionVerified = true;
+            notifyListeners();
+            return;
+          } catch (e) {
+            _addLog('[System] Error starting Windows VPN routing: $e');
+            await _sshTunnel.stopTunnel();
+            _vpnStatus = 'DISCONNECTED';
+            _buttonText = 'اتصال';
+            notifyListeners();
+            return;
+          }
+        } catch (e) {
+          if (_vpnStatus != 'CONNECTING') {
+            _addLog('[System] Connection was cancelled by user; ignoring SSH error.');
+            return;
+          }
+          _addLog('[System] Error: SSH Tunnel connection failed: $e');
+          _vpnStatus = 'DISCONNECTED';
+          _buttonText = 'اتصال';
+          notifyListeners();
+          return;
+        }
+      } else {
+        // VLESS / VMESS / Trojan logic on Windows!
+        _addLog('[System] VLESS mode detected on Windows. Building Xray config...');
+        try {
+          final xrayConfigJson = SingboxConfigBuilder.buildXrayConfig(
+            serverUrl: serverUrl,
+            sni: sni,
+          );
+          
+          _addLog('[System] Starting Windows VPN routing via Xray & tun2socks...');
+          await WindowsVpnManager.startVpn(
+            type: 'vless',
+            serverIp: resolvedIp ?? host ?? Uri.parse(serverUrl).host,
+            xrayConfigJson: xrayConfigJson,
+          );
+          
+          _addLog('[System] Windows VLESS VPN started successfully.');
+          _vpnStatus = 'CONNECTED';
+          _buttonText = 'قطع الاتصال';
+          _isConnectionVerified = true;
+          notifyListeners();
+          return;
+        } catch (e) {
+          _addLog('[System] Error starting Windows VLESS VPN: $e');
+          _vpnStatus = 'DISCONNECTED';
+          _buttonText = 'اتصال';
+          notifyListeners();
+          return;
+        }
+      }
+    }
+    // Android / iOS SSH Connection Flow:
     _addLog('[System] Selected Server: ${_selectedServer!.name}');
     _addLog('[System] Selected SNI Profile: ${sni ?? "Direct / None"}');
 
@@ -536,6 +673,7 @@ class VpnProvider with ChangeNotifier {
         serverUrl: serverUrl,
         sni: sni,
         sshLocalPort: _sshLocalPort,
+        resolvedIp: resolvedIp,
       );
       _addLog('[System] Config JSON generated successfully.');
     } catch (e) {
@@ -580,6 +718,13 @@ class VpnProvider with ChangeNotifier {
   }
 
   Future<void> toggleVpn() async {
+    final now = DateTime.now();
+    if (_lastToggleTime != null && now.difference(_lastToggleTime!) < const Duration(seconds: 2)) {
+      print('[VpnProvider] toggleVpn clicked too quickly, debouncing.');
+      return;
+    }
+    _lastToggleTime = now;
+
     if (_vpnStatus == 'CONNECTED' || _vpnStatus == 'CONNECTING') {
       _addLog('[System] User triggered disconnection. Stopping service...');
       
@@ -593,7 +738,20 @@ class VpnProvider with ChangeNotifier {
 
       // Perform actual service shutdown in the background
       try {
-        await _vpnService.stop();
+        if (Platform.isWindows) {
+          final serverUrl = _selectedServer?.url ?? '';
+          final isSsh = serverUrl.startsWith('ssh://');
+          String serverIp = '';
+          if (isSsh) {
+            final sshParams = SingboxConfigBuilder.parseSshUrl(serverUrl);
+            if (sshParams != null) serverIp = sshParams['host'];
+          } else {
+            serverIp = Uri.tryParse(serverUrl)?.host ?? '';
+          }
+          await WindowsVpnManager.stopVpn(serverIp);
+        } else {
+          await _vpnService.stop();
+        }
       } catch (e) {
         _addLog('[System] Error stopping VPN: $e');
       }
@@ -607,8 +765,15 @@ class VpnProvider with ChangeNotifier {
       notifyListeners();
     } else {
       await _connectToVpn();
-      if (_vpnStatus == 'CONNECTED' && _connectionTime > 0) {
-        startTimer();
+      if (_vpnStatus == 'CONNECTED') {
+        if (Platform.isWindows) {
+          if (!_isExtendedConnection) {
+            _connectionTime = 0;
+          }
+          startTimer();
+        } else if (_connectionTime > 0) {
+          startTimer();
+        }
       }
     }
   }
@@ -666,16 +831,43 @@ class VpnProvider with ChangeNotifier {
 
       try {
         final stopwatch = Stopwatch()..start();
-        final uri = Uri.tryParse(server.url);
-        if (uri != null && uri.host.isNotEmpty) {
+        String host = '';
+        int port = 443;
+        
+        final url = server.url;
+        if (url.startsWith('vmess://')) {
+          final base64Str = url.substring('vmess://'.length);
+          String normalized = base64Str;
+          final mod = base64Str.length % 4;
+          if (mod > 0) normalized += '=' * (4 - mod);
+          final decoded = jsonDecode(utf8.decode(base64.decode(normalized)));
+          host = decoded['add']?.toString() ?? '';
+          port = int.tryParse(decoded['port']?.toString() ?? '443') ?? 443;
+        } else if (url.startsWith('slowdns://')) {
+          final uri = Uri.tryParse(url);
+          if (uri != null) {
+            host = uri.queryParameters['dns_ip'] ?? '';
+            port = 53;
+          }
+        } else {
+          final uri = Uri.tryParse(url);
+          if (uri != null) {
+            host = uri.host;
+            port = uri.port != 0 ? uri.port : 443;
+          }
+        }
+
+        if (host.isNotEmpty) {
           final socket = await Socket.connect(
-            uri.host,
-            uri.port != 0 ? uri.port : 443,
+            host,
+            port,
             timeout: const Duration(seconds: 4),
           );
           stopwatch.stop();
           socket.destroy();
           _serverDelays[server.url] = stopwatch.elapsedMilliseconds;
+        } else {
+          _serverDelays[server.url] = -1;
         }
       } catch (e) {
         _serverDelays[server.url] = -1;
@@ -714,5 +906,49 @@ class VpnProvider with ChangeNotifier {
     _sshTunnel.stopTunnel();
     _vpnService.dispose();
     super.dispose();
+  }
+
+  void showRewardedAd({
+    required void Function() onCompleted,
+    required void Function() onCancelled,
+  }) {
+    if (Platform.isAndroid || Platform.isIOS) {
+      _adService.showRewardedAdWithCallbacks(
+        onCompleted: onCompleted,
+        onCancelled: onCancelled,
+      );
+    } else {
+      onCompleted();
+    }
+  }
+
+  bool _isCloudflareIp(String ip) {
+    try {
+      final parts = ip.split('.').map(int.parse).toList();
+      if (parts.length != 4) return false;
+      final first = parts[0];
+      final second = parts[1];
+      
+      // Cloudflare IPv4 ranges
+      if (first == 103) {
+        if (second >= 21 && second <= 23) return true;
+        if (second == 22) return true;
+        if (second == 31) return true;
+      }
+      if (first == 104) {
+        if (second >= 16 && second <= 27) return true;
+      }
+      if (first == 108 && second == 162) return true;
+      if (first == 131 && second == 27) return true;
+      if (first == 141 && second == 101) return true;
+      if (first == 162 && (second == 158 || second == 159)) return true;
+      if (first == 172 && second >= 64 && second <= 79) return true;
+      if (first == 173 && second == 245) return true;
+      if (first == 188 && second == 114) return true;
+      if (first == 190 && second == 93) return true;
+      if (first == 197 && second == 234) return true;
+      if (first == 198 && second == 41) return true;
+    } catch (_) {}
+    return false;
   }
 }

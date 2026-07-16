@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'dart:ui';
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -25,6 +26,8 @@ class _MyHomePageState extends State<MyHomePage>
   late final AnimationController _pulseController;
   late final Animation<double> _pulseAnimation;
   AppLifecycleListener? _lifecycleListener;
+  VpnProvider? _vpnProvider;
+  String? _lastStatus;
 
   final Uri _telegramUrl = Uri.parse('https://t.me/D_S_D_C1');
   final Uri _subscriptionUrl = Uri.parse('https://t.me/D_S_D_Cbot');
@@ -48,6 +51,13 @@ class _MyHomePageState extends State<MyHomePage>
     _pulseAnimation = Tween<double>(begin: 1.0, end: 1.12).animate(
       CurvedAnimation(parent: _pulseController, curve: Curves.easeInOut),
     );
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        _vpnProvider = Provider.of<VpnProvider>(context, listen: false);
+        _vpnProvider!.addListener(_vpnListener);
+        _lastStatus = _vpnProvider!.vpnStatus;
+      }
+    });
   }
 
   Future<void> _launchUrl(Uri url) async {
@@ -70,6 +80,7 @@ class _MyHomePageState extends State<MyHomePage>
 
   @override
   void dispose() {
+    _vpnProvider?.removeListener(_vpnListener);
     _lifecycleListener?.dispose();
     _pulseController.dispose();
     super.dispose();
@@ -91,7 +102,7 @@ class _MyHomePageState extends State<MyHomePage>
         (vpnProvider.vpnStatus == 'CONNECTING') ||
         vpnProvider.isVerifyingConnection;
 
-    // Control pulse animation based on fully connected status only
+    // Control pulse animation based on connection status (connected only)
     if (isFullyConnected) {
       if (!_pulseController.isAnimating) {
         _pulseController.repeat(reverse: true);
@@ -99,6 +110,7 @@ class _MyHomePageState extends State<MyHomePage>
     } else {
       if (_pulseController.isAnimating) {
         _pulseController.stop();
+        _pulseController.reset();
       }
     }
 
@@ -133,9 +145,13 @@ class _MyHomePageState extends State<MyHomePage>
                 Widget content = Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    SizedBox(height: topSpace),
+                    AnimatedContainer(
+                      duration: const Duration(milliseconds: 400),
+                      height: topSpace,
+                    ),
                     ConnectButton(
-                      isConnected: isFullyConnected,
+                      isConnected: isConnected,
+                      isFullyConnected: isFullyConnected,
                       isButtonLoading: isButtonLoading,
                       isAdLoading: vpnProvider.isAdLoading,
                       buttonText: vpnProvider.buttonText,
@@ -144,13 +160,19 @@ class _MyHomePageState extends State<MyHomePage>
                       isConnectionVerified: vpnProvider.isConnectionVerified,
                       connectionTime: vpnProvider.connectionTime,
                     ),
-                    SizedBox(height: middleSpace),
+                    AnimatedContainer(
+                      duration: const Duration(milliseconds: 400),
+                      height: middleSpace,
+                    ),
                     _buildConnectionDetails(vpnProvider),
-                    SizedBox(height: bottomSpace),
+                    AnimatedContainer(
+                      duration: const Duration(milliseconds: 400),
+                      height: bottomSpace,
+                    ),
                   ],
                 );
 
-                final bool allowScroll = isConnected || height < 640;
+                final bool allowScroll = !Platform.isWindows && (isConnected || height < 640);
 
                 return SingleChildScrollView(
                   physics: allowScroll
@@ -361,79 +383,93 @@ class _MyHomePageState extends State<MyHomePage>
 
     return GestureDetector(
       onTap: isDisabled ? null : onTap,
-      child: Container(
-        height: 72,
-        padding: const EdgeInsets.symmetric(horizontal: 16),
-        decoration: BoxDecoration(
-          color: theme.cardTheme.color,
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(
-            color: themeProvider.isDarkMode
-                ? Colors.white.withOpacity(0.03)
-                : Colors.black.withOpacity(0.03),
-            width: 1.5,
-          ),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(themeProvider.isDarkMode ? 0.1 : 0.02),
-              blurRadius: 10,
-              offset: const Offset(0, 4),
-            ),
-          ],
-        ),
-        child: Row(
-          children: [
-            Container(
-              width: 42,
-              height: 42,
-              decoration: BoxDecoration(
-                color: iconBgColor,
-                borderRadius: BorderRadius.circular(12),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(22),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+          child: Container(
+            height: 74,
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            decoration: BoxDecoration(
+              color: themeProvider.isDarkMode
+                  ? Colors.white.withOpacity(0.04) // Frosted dark glass
+                  : Colors.white.withOpacity(0.85), // Frosted light glass
+              borderRadius: BorderRadius.circular(22),
+              border: Border.all(
+                color: themeProvider.isDarkMode
+                    ? Colors.white.withOpacity(0.06)
+                    : Colors.black.withOpacity(0.04),
+                width: 1.0,
               ),
-              child: Icon(
-                icon,
-                color: iconColor,
-                size: 22,
-              ),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(themeProvider.isDarkMode ? 0.15 : 0.02),
+                  blurRadius: 15,
+                  offset: const Offset(0, 8),
+                ),
+              ],
             ),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    label,
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: theme.textTheme.bodySmall?.color?.withOpacity(0.5),
-                      fontSize: 12,
-                      fontWeight: FontWeight.w500,
+            child: Row(
+              children: [
+                Container(
+                  width: 44,
+                  height: 44,
+                  decoration: BoxDecoration(
+                    color: iconBgColor,
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(
+                      color: iconColor.withOpacity(0.2),
+                      width: 1.0,
                     ),
                   ),
-                  const SizedBox(height: 2),
-                  Text(
-                    title,
-                    style: theme.textTheme.bodyLarge?.copyWith(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 15,
-                    ),
-                    overflow: TextOverflow.ellipsis,
+                  child: Icon(
+                    icon,
+                    color: iconColor,
+                    size: 22,
+                  ),
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        label,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.textTheme.bodySmall?.color?.withOpacity(0.4),
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                          letterSpacing: 0.2,
+                        ),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        title,
+                        style: theme.textTheme.bodyLarge?.copyWith(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 15,
+                          letterSpacing: 0.1,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
+                ),
+                if (trailing != null) ...[
+                  const SizedBox(width: 8),
+                  trailing,
+                ] else ...[
+                  const SizedBox(width: 8),
+                  Icon(
+                    Icons.chevron_right_rounded,
+                    color: theme.textTheme.bodyMedium?.color?.withOpacity(0.25),
+                    size: 26,
                   ),
                 ],
-              ),
+              ],
             ),
-            if (trailing != null) ...[
-              const SizedBox(width: 8),
-              trailing,
-            ] else ...[
-              const SizedBox(width: 8),
-              Icon(
-                Icons.chevron_right_rounded,
-                color: theme.textTheme.bodyMedium?.color?.withOpacity(0.3),
-                size: 24,
-              ),
-            ],
-          ],
+          ),
         ),
       ),
     );
@@ -470,20 +506,46 @@ class _MyHomePageState extends State<MyHomePage>
       }
     }
 
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-      decoration: BoxDecoration(
-        color: delayColor.withOpacity(0.12),
-        borderRadius: BorderRadius.circular(10),
-      ),
-      child: Text(
-        delayText,
-        style: TextStyle(
-          color: delayColor,
-          fontWeight: FontWeight.bold,
-          fontSize: 12,
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        // Premium breathing pulse dot
+        Container(
+          width: 8,
+          height: 8,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: delayColor,
+            boxShadow: [
+              BoxShadow(
+                color: delayColor.withOpacity(0.4),
+                blurRadius: 4,
+                spreadRadius: 1,
+              ),
+            ],
+          ),
         ),
-      ),
+        const SizedBox(width: 8),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+          decoration: BoxDecoration(
+            color: delayColor.withOpacity(0.08),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(
+              color: delayColor.withOpacity(0.18),
+              width: 1.0,
+            ),
+          ),
+          child: Text(
+            delayText,
+            style: TextStyle(
+              color: delayColor,
+              fontWeight: FontWeight.bold,
+              fontSize: 11,
+            ),
+          ),
+        ),
+      ],
     );
   }
 
@@ -519,6 +581,238 @@ class _MyHomePageState extends State<MyHomePage>
           onProfileSelected: (profile) => vpnProvider.handleSelectionChange<SniProfile>(profile),
         );
       },
+    );
+  }
+
+  void _vpnListener() {
+    if (!mounted) return;
+    final currentStatus = _vpnProvider!.vpnStatus;
+    if (_lastStatus == 'CONNECTING' && currentStatus == 'CONNECTED') {
+      _showRewardVideoDialog();
+    }
+    _lastStatus = currentStatus;
+  }
+
+  void _showRewardVideoDialog() {
+    final vpn = _vpnProvider;
+    if (vpn != null && vpn.isRewardedAdReady) {
+      print('[HomePage] Unity Ads is ready, showing video...');
+      vpn.showRewardedAd(
+        onCompleted: () {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                'تمت مشاهدة إعلان يونيتي بالكامل! استمتع بالاتصال.',
+                textAlign: TextAlign.right,
+                style: TextStyle(fontFamily: 'Cairo'),
+              ),
+              backgroundColor: Colors.green,
+            ),
+          );
+        },
+        onCancelled: () {
+          vpn.toggleVpn();
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                'تم قطع الاتصال لعدم اكتمال الإعلان.',
+                textAlign: TextAlign.right,
+                style: TextStyle(fontFamily: 'Cairo'),
+              ),
+              backgroundColor: Colors.redAccent,
+            ),
+          );
+        },
+      );
+    } else {
+      print('[HomePage] Unity Ads is not ready, bypassing dialog and connecting directly.');
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'تم الاتصال بنجاح!',
+            textAlign: TextAlign.right,
+            style: TextStyle(fontFamily: 'Cairo'),
+          ),
+          backgroundColor: Colors.green,
+          duration: Duration(seconds: 2),
+        ),
+      );
+    }
+  }
+}
+
+class _RewardVideoDialog extends StatefulWidget {
+  final VoidCallback onCompleted;
+  final VoidCallback onCancelled;
+
+  const _RewardVideoDialog({
+    required this.onCompleted,
+    required this.onCancelled,
+  });
+
+  @override
+  State<_RewardVideoDialog> createState() => _RewardVideoDialogState();
+}
+
+class _RewardVideoDialogState extends State<_RewardVideoDialog> {
+  int _secondsLeft = 30;
+  Timer? _timer;
+
+  @override
+  void initState() {
+    super.initState();
+    _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (_secondsLeft > 1) {
+        setState(() {
+          _secondsLeft--;
+        });
+      } else {
+        _timer?.cancel();
+        widget.onCompleted();
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  void _handleClose() {
+    showDialog(
+      context: context,
+      barrierColor: Colors.black.withOpacity(0.8),
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1E1E2C),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text(
+          'تنبيه',
+          textAlign: TextAlign.right,
+          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+        ),
+        content: const Text(
+          'إذا خرجت الآن فسيتم فصل اتصال الـ VPN. هل أنت متأكد من الخروج؟',
+          textAlign: TextAlign.right,
+          style: TextStyle(color: Colors.white70),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('إكمال المشاهدة', style: TextStyle(color: Colors.cyan)),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.of(ctx).pop();
+              widget.onCancelled();
+            },
+            child: const Text('قطع الاتصال والخروج', style: TextStyle(color: Colors.redAccent)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final progress = (30 - _secondsLeft) / 30.0;
+    return WillPopScope(
+      onWillPop: () async {
+        _handleClose();
+        return false;
+      },
+      child: Scaffold(
+        backgroundColor: Colors.black,
+        body: SafeArea(
+          child: Stack(
+            children: [
+              Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Container(
+                      width: 120,
+                      height: 120,
+                      decoration: BoxDecoration(
+                        color: Colors.cyan.withOpacity(0.1),
+                        shape: BoxShape.circle,
+                        border: Border.all(color: Colors.cyan.withOpacity(0.5), width: 2),
+                      ),
+                      child: const Icon(
+                        Icons.play_circle_filled,
+                        size: 80,
+                        color: Colors.cyan,
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+                    const Text(
+                      'جاري تشغيل إعلان المكافأة',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 22,
+                        fontWeight: FontWeight.bold,
+                        fontFamily: 'Cairo',
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    const Text(
+                      'يرجى عدم إغلاق هذه الصفحة لتجنب قطع الاتصال',
+                      style: TextStyle(
+                        color: Colors.white54,
+                        fontSize: 14,
+                        fontFamily: 'Cairo',
+                      ),
+                    ),
+                    const SizedBox(height: 40),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 40.0),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(10),
+                        child: LinearProgressIndicator(
+                          value: progress,
+                          backgroundColor: Colors.white10,
+                          valueColor: const AlwaysStoppedAnimation<Color>(Colors.cyan),
+                          minHeight: 8,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      'متبقي $_secondsLeft ثانية',
+                      style: const TextStyle(
+                        color: Colors.cyanAccent,
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                        fontFamily: 'Cairo',
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Positioned(
+                top: 16,
+                right: 16,
+                child: InkWell(
+                  onTap: _handleClose,
+                  borderRadius: BorderRadius.circular(20),
+                  child: Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.1),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(
+                      Icons.close,
+                      color: Colors.white,
+                      size: 24,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

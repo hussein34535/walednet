@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:WaledNet/data/servers.dart';
 import 'package:WaledNet/theme_provider.dart';
+import 'package:WaledNet/services/api_service.dart';
+import 'package:WaledNet/providers/vpn_provider.dart';
 
 class ProfileBottomSheet extends StatelessWidget {
   final List<SniProfile> profiles;
@@ -14,6 +16,203 @@ class ProfileBottomSheet extends StatelessWidget {
     required this.selectedProfile,
     required this.onProfileSelected,
   });
+
+  void _showAddSniDialog(BuildContext context) {
+    final theme = Theme.of(context);
+    final themeProvider = Provider.of<ThemeProvider>(context, listen: false);
+    final vpnProvider = Provider.of<VpnProvider>(context, listen: false);
+    
+    final nameController = TextEditingController();
+    final hostController = TextEditingController();
+    final formKey = GlobalKey<FormState>();
+    
+    bool isLoading = false;
+
+    showDialog(
+      context: context,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              backgroundColor: theme.cardTheme.color,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(24),
+                side: BorderSide(
+                  color: themeProvider.isDarkMode
+                      ? Colors.white.withOpacity(0.08)
+                      : Colors.black.withOpacity(0.04),
+                ),
+              ),
+              title: const Text(
+                'إضافة SNI جديد',
+                textAlign: TextAlign.right,
+                style: TextStyle(
+                  fontFamily: 'Cairo',
+                  fontWeight: FontWeight.bold,
+                  fontSize: 18,
+                ),
+              ),
+              content: Form(
+                key: formKey,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    TextFormField(
+                      controller: nameController,
+                      textAlign: TextAlign.right,
+                      style: const TextStyle(fontFamily: 'Cairo', fontSize: 14),
+                      decoration: InputDecoration(
+                        hintText: 'اسم الحزمة (مثال: رفع وي)',
+                        hintStyle: TextStyle(
+                          fontFamily: 'Cairo',
+                          fontSize: 13,
+                          color: Colors.grey.withOpacity(0.7),
+                        ),
+                        contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 16, vertical: 12),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(14),
+                          borderSide: BorderSide(color: Colors.grey.withOpacity(0.3)),
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(14),
+                          borderSide: BorderSide(color: Colors.grey.withOpacity(0.2)),
+                        ),
+                      ),
+                      validator: (value) {
+                        if (value == null || value.trim().isEmpty) {
+                          return 'يرجى إدخال اسم الحزمة';
+                        }
+                        return null;
+                      },
+                    ),
+                    const SizedBox(height: 12),
+                    TextFormField(
+                      controller: hostController,
+                      textAlign: TextAlign.left,
+                      keyboardType: TextInputType.url,
+                      style: const TextStyle(fontSize: 14),
+                      decoration: InputDecoration(
+                        hintText: 'Host / Domain (مثال: scorm.ekb.eg)',
+                        hintStyle: TextStyle(
+                          fontFamily: 'Cairo',
+                          fontSize: 13,
+                          color: Colors.grey.withOpacity(0.7),
+                        ),
+                        contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 16, vertical: 12),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(14),
+                          borderSide: BorderSide(color: Colors.grey.withOpacity(0.3)),
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(14),
+                          borderSide: BorderSide(color: Colors.grey.withOpacity(0.2)),
+                        ),
+                      ),
+                      validator: (value) {
+                        if (value == null || value.trim().isEmpty) {
+                          return 'يرجى إدخال النطاق (Domain)';
+                        }
+                        return null;
+                      },
+                    ),
+                  ],
+                ),
+              ),
+              actionsAlignment: MainAxisAlignment.spaceBetween,
+              actionsPadding: const EdgeInsets.only(left: 16, right: 16, bottom: 16),
+              actions: [
+                TextButton(
+                  onPressed: isLoading ? null : () => Navigator.pop(context),
+                  child: Text(
+                    'إلغاء',
+                    style: TextStyle(
+                      fontFamily: 'Cairo',
+                      color: Colors.grey.withOpacity(0.8),
+                    ),
+                  ),
+                ),
+                ElevatedButton(
+                  onPressed: isLoading
+                      ? null
+                      : () async {
+                          if (formKey.currentState!.validate()) {
+                            setDialogState(() {
+                              isLoading = true;
+                            });
+                            
+                            final success = await ApiService.addSniProfile(
+                              nameController.text.trim(),
+                              hostController.text.trim(),
+                            );
+                            
+                            if (success) {
+                              await vpnProvider.refreshData();
+                              if (context.mounted) {
+                                Navigator.pop(context); // Close dialog
+                                Navigator.pop(context); // Close bottom sheet to show updated list
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text(
+                                      'تمت إضافة الـ SNI الجديد بنجاح!',
+                                      textAlign: TextAlign.right,
+                                      style: TextStyle(fontFamily: 'Cairo'),
+                                    ),
+                                    backgroundColor: Colors.green,
+                                  ),
+                                );
+                              }
+                            } else {
+                              setDialogState(() {
+                                isLoading = false;
+                              });
+                              if (context.mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text(
+                                      'فشل في إضافة الـ SNI. يرجى المحاولة لاحقاً.',
+                                      textAlign: TextAlign.right,
+                                      style: TextStyle(fontFamily: 'Cairo'),
+                                    ),
+                                    backgroundColor: Colors.redAccent,
+                                  ),
+                                );
+                              }
+                            }
+                          }
+                        },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: theme.colorScheme.primary,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  child: isLoading
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
+                        )
+                      : const Text(
+                          'حفظ',
+                          style: TextStyle(
+                            fontFamily: 'Cairo',
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -51,15 +250,44 @@ class ProfileBottomSheet extends StatelessWidget {
               borderRadius: BorderRadius.circular(10),
             ),
           ),
-          const SizedBox(height: 18),
-          Text(
-            'اختر الحزمة (SNI Profile)',
-            style: theme.textTheme.titleMedium?.copyWith(
-              fontWeight: FontWeight.bold,
-              fontSize: 18,
+          const SizedBox(height: 14),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  'اختر الحزمة (SNI Profile)',
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 17,
+                  ),
+                ),
+                ElevatedButton.icon(
+                  onPressed: () => _showAddSniDialog(context),
+                  icon: const Icon(Icons.add, size: 16, color: Colors.white),
+                  label: const Text(
+                    'إضافة',
+                    style: TextStyle(
+                      fontFamily: 'Cairo',
+                      fontSize: 13,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white,
+                    ),
+                  ),
+                  style: ElevatedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                    backgroundColor: theme.colorScheme.primary,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    elevation: 2,
+                  ),
+                ),
+              ],
             ),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 12),
           Divider(
             height: 1,
             color: themeProvider.isDarkMode

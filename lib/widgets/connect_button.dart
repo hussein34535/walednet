@@ -4,6 +4,7 @@ import 'package:WaledNet/theme_provider.dart';
 
 class ConnectButton extends StatelessWidget {
   final bool isConnected;
+  final bool isFullyConnected;
   final bool isButtonLoading;
   final bool isAdLoading;
   final String buttonText;
@@ -15,6 +16,7 @@ class ConnectButton extends StatelessWidget {
   const ConnectButton({
     super.key,
     required this.isConnected,
+    required this.isFullyConnected,
     required this.isButtonLoading,
     required this.isAdLoading,
     required this.buttonText,
@@ -39,78 +41,107 @@ class ConnectButton extends StatelessWidget {
           animation: pulseAnimation,
           builder: (context, child) {
             double scale = 1.0;
-            if (isConnected) {
+            if (isFullyConnected) {
               scale = pulseAnimation.value;
             }
             return Stack(
               alignment: Alignment.center,
               children: [
-                // Outer glowing aura
+                // Soft radial breath glow for negative space accent
                 Container(
-                  width: 190 * scale,
-                  height: 190 * scale,
+                  width: 280 * scale,
+                  height: 280 * scale,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
-                    color: isConnected
-                        ? activeColor.withOpacity(0.12)
-                        : Colors.transparent,
+                    gradient: RadialGradient(
+                      colors: isFullyConnected
+                          ? [
+                              activeColor.withOpacity(0.70), // Highly intense glow when connected
+                              activeColor.withOpacity(0.25),
+                              Colors.transparent,
+                            ]
+                          : isConnected
+                              ? [
+                                  activeColor.withOpacity(0.25), // Softer glow while connecting
+                                  activeColor.withOpacity(0.05),
+                                  Colors.transparent,
+                                ]
+                              : [
+                                  Colors.transparent,
+                                  Colors.transparent,
+                                ],
+                    ),
                   ),
                 ),
-                // Inner button
+                // The main physical/glassy interactive orb button
                 GestureDetector(
-                  onTap: isConnected ? onTap : (isButtonLoading ? null : onTap),
+                  onTap: isFullyConnected ? onTap : (isButtonLoading ? null : onTap),
                   child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 400),
-                    width: 150,
-                    height: 150,
+                    duration: const Duration(milliseconds: 500),
+                    width: 140,
+                    height: 140,
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
-                      gradient: isConnected
+                      gradient: isFullyConnected
                           ? LinearGradient(
-                              colors: [activeColor, activeColor.withBlue(255)],
+                              colors: [
+                                activeColor,
+                                const Color(0xFF5856D6), // Apple Indigo/Purple accent
+                              ],
                               begin: Alignment.topLeft,
                               end: Alignment.bottomRight,
                             )
                           : LinearGradient(
                               colors: themeProvider.isDarkMode
                                   ? [
-                                      const Color(0xFF2C2C2E),
-                                      const Color(0xFF1C1C1E)
+                                      const Color(0xFF181926), // Deep matte slate/charcoal
+                                      const Color(0xFF0F1018),
                                     ]
-                                  : [Colors.white, const Color(0xFFE5E5EA)],
+                                  : [
+                                      Colors.white,
+                                      const Color(0xFFF2F2F7),
+                                    ],
                               begin: Alignment.topLeft,
                               end: Alignment.bottomRight,
                             ),
                       boxShadow: [
+                        // Soft wide outer neon glow
                         BoxShadow(
-                          color: isConnected
-                              ? activeColor.withOpacity(0.4)
+                          color: isFullyConnected
+                              ? activeColor.withOpacity(0.55)
                               : Colors.black.withOpacity(
-                                  themeProvider.isDarkMode ? 0.3 : 0.08),
-                          blurRadius: isConnected ? 25 : 15,
-                          spreadRadius: isConnected ? 2 : 0,
+                                  themeProvider.isDarkMode ? 0.35 : 0.04),
+                          blurRadius: isFullyConnected ? 55 : 15,
+                          spreadRadius: isFullyConnected ? 4 : 0,
                           offset: const Offset(0, 8),
                         ),
+                        // Intense inner neon core glow for dopamine boost
+                        if (isFullyConnected)
+                          BoxShadow(
+                            color: const Color(0xFF5856D6).withOpacity(0.65),
+                            blurRadius: 25,
+                            spreadRadius: 1,
+                          ),
                       ],
                       border: Border.all(
-                        color: isConnected
-                            ? Colors.white.withOpacity(0.2)
+                        color: isFullyConnected
+                            ? const Color(0xFF007AFF) // Strong Neon Blue line on the button itself
                             : themeProvider.isDarkMode
                                 ? Colors.white.withOpacity(0.08)
                                 : Colors.black.withOpacity(0.03),
-                        width: 1.5,
+                        width: 2.2, // Strong neon line thickness
                       ),
                     ),
                     child: Center(
                       child: isButtonLoading
                           ? CircularProgressIndicator(
-                              color: isConnected ? Colors.white : activeColor,
-                              strokeWidth: 4,
+                              color: isFullyConnected ? Colors.white : activeColor,
+                              strokeWidth: 4.0,
                             )
                           : Icon(
                               Icons.power_settings_new_rounded,
-                              size: 55,
-                              color: isConnected ? Colors.white : inactiveColor,
+                              size: 54,
+                              color: isFullyConnected ? Colors.white : inactiveColor.withOpacity(0.7),
                             ),
                     ),
                   ),
@@ -130,41 +161,42 @@ class ConnectButton extends StatelessWidget {
             color: isConnected ? activeColor : inactiveColor,
           ),
         ),
-        const SizedBox(height: 12),
         // Timer Widget in an elegant capsule
-        if (isConnected && isConnectionVerified)
-          AnimatedOpacity(
-            opacity: (isConnected && isConnectionVerified) ? 1.0 : 0.0,
-            duration: const Duration(milliseconds: 300),
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-              decoration: BoxDecoration(
-                color: activeColor.withOpacity(0.08),
-                borderRadius: BorderRadius.circular(20),
-                border: Border.all(
-                  color: activeColor.withOpacity(0.15),
-                  width: 1,
-                ),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Icon(Icons.timer_outlined,
-                      size: 16, color: Colors.grey),
-                  const SizedBox(width: 8),
-                  Text(
-                    '${(connectionTime ~/ 3600).toString().padLeft(2, '0')}:${((connectionTime % 3600) ~/ 60).toString().padLeft(2, '0')}:${(connectionTime % 60).toString().padLeft(2, '0')}',
-                    style: const TextStyle(
-                      fontFamily: 'monospace',
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                      letterSpacing: 1.0,
+        AnimatedSize(
+          duration: const Duration(milliseconds: 350),
+          curve: Curves.easeInOut,
+          child: (isConnected && isConnectionVerified)
+              ? Container(
+                  margin: const EdgeInsets.only(top: 12),
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: activeColor.withOpacity(0.08),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(
+                      color: activeColor.withOpacity(0.15),
+                      width: 1,
                     ),
                   ),
-                ],
-              ),
-            ),
-          ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.timer_outlined,
+                          size: 16, color: Colors.grey),
+                      const SizedBox(width: 8),
+                      Text(
+                        '${(connectionTime ~/ 3600).toString().padLeft(2, '0')}:${((connectionTime % 3600) ~/ 60).toString().padLeft(2, '0')}:${(connectionTime % 60).toString().padLeft(2, '0')}',
+                        style: const TextStyle(
+                          fontFamily: 'monospace',
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                          letterSpacing: 1.0,
+                        ),
+                      ),
+                    ],
+                  ),
+                )
+              : const SizedBox.shrink(),
+        ),
       ],
     );
   }

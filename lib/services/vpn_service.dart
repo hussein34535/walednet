@@ -73,7 +73,9 @@ class VpnService {
   }
 
   void _updateState(String message) {
-    if (message.contains('start') || message.contains('connecting')) {
+    if (message.contains('disconnected')) {
+      _state = VpnState.disconnected;
+    } else if (message.contains('start') || message.contains('connecting')) {
       _state = VpnState.connecting;
     } else if (message.contains('started') || message.contains('connected')) {
       _state = VpnState.connected;

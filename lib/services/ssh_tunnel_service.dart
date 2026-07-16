@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:isolate';
 import 'dart:typed_data';
 import 'package:dartssh2/dartssh2.dart';
 
@@ -8,19 +9,18 @@ class SshTunnelService {
   factory SshTunnelService() => _instance;
   SshTunnelService._internal();
 
-  SSHClient? _sshClient;
-  SSHDynamicForward? _forward;
-  Socket? _activeSocket;
+  Isolate? _isolate;
+  ReceivePort? _receivePort;
+  SendPort? _isolateSendPort;
+
   bool _isClosed = true;
   bool _hasEverConnected = false;
   int _localPort = 10809;
 
   // Keepalive & reconnect
-  Timer? _keepaliveTimer;
   Timer? _reconnectTimer;
   int _reconnectAttempts = 0;
   static const int _maxReconnectAttempts = 6;
-  static const Duration _keepaliveInterval = Duration(seconds: 25);
 
   // Stored params for reconnect
   String? _host;
@@ -34,7 +34,7 @@ class SshTunnelService {
   void Function(bool connected)? onConnectionChanged;
   void Function(String message)? onStatusUpdate;
 
-  bool get isActive => _sshClient != null && !_isClosed;
+  bool get isActive => _isolate != null && !_isClosed;
   int get localSocksPort => _localPort;
 
   // ──────────────────────────────────────────────
@@ -50,7 +50,6 @@ class SshTunnelService {
     bool useSsl = false,
     int localPort = 10809,
   }) async {
-    await _cleanUp();
     _isClosed = false;
     _reconnectAttempts = 0;
     _hasEverConnected = false;
@@ -71,9 +70,21 @@ class SshTunnelService {
     _isClosed = true;
     _hasEverConnected = false;
     _reconnectAttempts = _maxReconnectAttempts; // منع أي reconnect
-    await _cleanUp();
+    _reconnectTimer?.cancel();
+    _reconnectTimer = null;
+
+    if (_isolateSendPort != null) {
+      try {
+        _isolateSendPort!.send({'action': 'stop'});
+      } catch (_) {}
+      _isolateSendPort = null;
+    }
+    _receivePort?.close();
+    _receivePort = null;
+    _isolate = null;
+
     _host = null;
-    print('[SshTunnel] Stopped by user');
+    _log('Stopped by user');
   }
 
   // ──────────────────────────────────────────────
@@ -83,148 +94,84 @@ class SshTunnelService {
   Future<void> _connect() async {
     if (_host == null || _isClosed) return;
 
-    try {
-      _log('Connecting to $_host:$_port (SSL=$_useSsl, SNI=$_sni)');
+    // تنظيف أي آيسوليت شغال سابقاً
+    if (_isolateSendPort != null) {
+      try {
+        _isolateSendPort!.send({'action': 'stop'});
+      } catch (_) {}
+      _isolateSendPort = null;
+    }
+    _receivePort?.close();
+    _receivePort = null;
+    _isolate = null;
 
-      Socket baseSocket = await Socket.connect(
-        _host!,
-        _port!,
-        timeout: const Duration(seconds: 10),
-      );
-      if (_isClosed) {
-        baseSocket.destroy();
-        return;
-      }
-      _activeSocket = baseSocket;
-      _log('TCP connected');
+    _receivePort = ReceivePort();
+    Completer<void> connectCompleter = Completer<void>();
 
-      if (_useSsl) {
-        final sniHost = (_sni != null && _sni!.isNotEmpty) ? _sni! : _host!;
-        _log('Securing with TLS. SNI: $sniHost');
-        final secureSocket = await SecureSocket.secure(
-          baseSocket,
-          host: sniHost,
-          onBadCertificate: (_) {
-            _log('Bad TLS cert accepted (SSH-over-TLS)');
-            return true;
-          },
-        ).timeout(const Duration(seconds: 10));
-        
-        if (_isClosed) {
-          secureSocket.destroy();
-          return;
+    _receivePort!.listen((message) async {
+      if (message is SendPort) {
+        _isolateSendPort = message;
+        // أرسل بارامترات الاتصال للبدء في الخلفية
+        _isolateSendPort!.send({
+          'action': 'connect',
+          'host': _host,
+          'port': _port,
+          'username': _username,
+          'password': _password,
+          'sni': _sni,
+          'useSsl': _useSsl,
+          'localPort': _localPort,
+        });
+      } else if (message is Map<String, dynamic>) {
+        final type = message['type'];
+        if (type == 'log') {
+          _log(message['message']);
+        } else if (type == 'ready') {
+          _localPort = message['port'] as int;
+          _log('SOCKS5 proxy ready on 127.0.0.1:$_localPort ✓');
+          _reconnectAttempts = 0;
+          _hasEverConnected = true;
+          onConnectionChanged?.call(true);
+          if (!connectCompleter.isCompleted) {
+            connectCompleter.complete();
+          }
+        } else if (type == 'error') {
+          final errMsg = message['message'];
+          _log('Connection failed: $errMsg');
+          
+          if (_hasEverConnected) {
+            onConnectionChanged?.call(false);
+            _scheduleReconnect();
+          } else {
+            if (!connectCompleter.isCompleted) {
+              connectCompleter.completeError(Exception(errMsg));
+            }
+          }
+        } else if (type == 'disconnected') {
+          final msg = message['message'];
+          _log('Disconnected: $msg');
+          if (!_isClosed) {
+            _handleUnexpectedDisconnect();
+          }
         }
-        _activeSocket = secureSocket;
-        _log('TLS secured');
       }
+    });
 
-      _log('Initializing SSH client...');
-      _sshClient = SSHClient(
-        RawSSHSocket(_activeSocket!),
-        username: _username!,
-        onPasswordRequest: () => _password!,
-        keepAliveInterval: const Duration(seconds: 20),
-      );
-
-      _log('Authenticating...');
-      await _sshClient!.authenticated.timeout(const Duration(seconds: 30));
-      
-      if (_isClosed) {
-        await _cleanUp();
-        return;
-      }
-      _log('SSH authenticated √');
-
-      _log('Starting SOCKS5 proxy on 127.0.0.1:$_localPort...');
-      _forward = await _sshClient!.forwardDynamic(
-        bindHost: '127.0.0.1',
-        bindPort: _localPort,
-      ).timeout(const Duration(seconds: 10));
-
-      if (_isClosed) {
-        await _cleanUp();
-        return;
-      }
-      _localPort = _forward!.port;
-      _log('SOCKS5 proxy ready on 127.0.0.1:$_localPort ✓');
-
-      // ابدأ keepalive + monitor
-      _startKeepalive();
-      _monitorConnection();
-
-      _reconnectAttempts = 0;
-      _hasEverConnected = true;
-      onConnectionChanged?.call(true);
-
+    try {
+      _isolate = await Isolate.spawn(_sshTunnelIsolateEntry, _receivePort!.sendPort);
+      await connectCompleter.future;
     } catch (e) {
-      if (_isClosed) {
-        _log('Connection aborted by user during connect/auth phase.');
-        return;
-      }
-      _log('Connection failed: $e');
-      await _cleanUp(clearParams: false);
-
-      if (_hasEverConnected) {
-        // الـ tunnel كان شغال فعلاً وانقطع — بلّغ الـ VpnProvider
-        onConnectionChanged?.call(false);
-        _scheduleReconnect();
-      } else {
-        // أول محاولة اتصال فشلت — ارمي الخطأ للـ caller (VpnProvider._connectToVpn)
-        // بدون ما نشغل reconnect أو نبلغ بتغيير حالة الاتصال
+      if (!_hasEverConnected) {
         rethrow;
       }
     }
   }
 
-  // ──────────────────────────────────────────────
-  // KEEPALIVE — ping كل 25 ثانية
-  // ──────────────────────────────────────────────
-
-  void _startKeepalive() {
-    _keepaliveTimer?.cancel();
-    _keepaliveTimer = Timer.periodic(_keepaliveInterval, (_) async {
-      if (_sshClient == null || _isClosed) return;
-      try {
-        // نبعت channel request صغير كـ heartbeat
-        await _sshClient!.ping().timeout(const Duration(seconds: 8));
-        _log('Keepalive ✓');
-      } catch (e) {
-        _log('Keepalive failed: $e — triggering reconnect');
-        _handleUnexpectedDisconnect();
-      }
-    });
-  }
-
-  // ──────────────────────────────────────────────
-  // MONITOR — راقب لو الـ SSH connection انكسر
-  // ──────────────────────────────────────────────
-
-  void _monitorConnection() {
-    _sshClient?.done.then((_) {
-      if (!_isClosed) {
-        _log('Connection dropped unexpectedly!');
-        _handleUnexpectedDisconnect();
-      }
-    }).catchError((e) {
-      if (!_isClosed) {
-        _log('Connection error: $e');
-        _handleUnexpectedDisconnect();
-      }
-    });
-  }
-
   void _handleUnexpectedDisconnect() {
     if (_isClosed) return;
-    _keepaliveTimer?.cancel();
-    _forward = null;
-    _sshClient = null;
     onConnectionChanged?.call(false);
     _scheduleReconnect();
   }
-
-  // ──────────────────────────────────────────────
-  // AUTO-RECONNECT — exponential backoff
-  // ──────────────────────────────────────────────
 
   void _scheduleReconnect() {
     if (_isClosed || _host == null) return;
@@ -235,7 +182,6 @@ class SshTunnelService {
     }
 
     _reconnectAttempts++;
-    // Exponential backoff: 2s, 4s, 8s, 16s, 30s, 30s
     final delaySeconds = _reconnectAttempts <= 4
         ? (2 * _reconnectAttempts)
         : 30;
@@ -252,36 +198,157 @@ class SshTunnelService {
     });
   }
 
-  // ──────────────────────────────────────────────
-  // CLEANUP
-  // ──────────────────────────────────────────────
-
-  Future<void> _cleanUp({bool clearParams = true}) async {
-    _keepaliveTimer?.cancel();
-    _keepaliveTimer = null;
-    _reconnectTimer?.cancel();
-    _reconnectTimer = null;
-
-    try {
-      _activeSocket?.destroy();
-    } catch (_) {}
-    _activeSocket = null;
-
-    try { _forward?.close(); } catch (_) {}
-    _forward = null;
-
-    try { _sshClient?.close(); } catch (_) {}
-    _sshClient = null;
-
-    if (clearParams) {
-      _reconnectAttempts = 0;
-    }
-  }
-
   void _log(String msg) {
     print('[SshTunnel] $msg');
     onStatusUpdate?.call(msg);
   }
+}
+
+// دالة العمل الخاصة بالـ Isolate للاتصال في خلفية النظام
+@pragma('vm:entry-point')
+void _sshTunnelIsolateEntry(SendPort mainSendPort) {
+  final receivePort = ReceivePort();
+  mainSendPort.send(receivePort.sendPort);
+
+  SSHClient? sshClient;
+  SSHDynamicForward? forward;
+  Socket? activeSocket;
+  Timer? keepaliveTimer;
+  bool isClosed = false;
+
+  receivePort.listen((message) async {
+    if (message is Map<String, dynamic>) {
+      final action = message['action'];
+      if (action == 'connect') {
+        final host = message['host'] as String;
+        final port = message['port'] as int;
+        final username = message['username'] as String;
+        final password = message['password'] as String;
+        final sni = message['sni'] as String?;
+        final useSsl = message['useSsl'] as bool;
+        final localPort = message['localPort'] as int;
+
+        Future<void> cleanUp() async {
+          keepaliveTimer?.cancel();
+          keepaliveTimer = null;
+          try { activeSocket?.destroy(); } catch (_) {}
+          activeSocket = null;
+          try { await forward?.close(); } catch (_) {}
+          forward = null;
+          try { sshClient?.close(); } catch (_) {}
+          sshClient = null;
+        }
+
+        try {
+          mainSendPort.send({'type': 'log', 'message': 'Connecting to $host:$port (SSL=$useSsl, SNI=$sni)'});
+          
+          Socket baseSocket = await Socket.connect(
+            host,
+            port,
+            timeout: const Duration(seconds: 10),
+          );
+          if (isClosed) {
+            baseSocket.destroy();
+            return;
+          }
+          activeSocket = baseSocket;
+          mainSendPort.send({'type': 'log', 'message': 'TCP connected'});
+
+          if (useSsl) {
+            final sniHost = (sni != null && sni.isNotEmpty) ? sni : host;
+            mainSendPort.send({'type': 'log', 'message': 'Securing with TLS. SNI: $sniHost'});
+            final secureSocket = await SecureSocket.secure(
+              baseSocket,
+              host: sniHost,
+              onBadCertificate: (_) {
+                mainSendPort.send({'type': 'log', 'message': 'Bad TLS cert accepted (SSH-over-TLS)'});
+                return true;
+              },
+            ).timeout(const Duration(seconds: 10));
+
+            if (isClosed) {
+              secureSocket.destroy();
+              return;
+            }
+            activeSocket = secureSocket;
+            mainSendPort.send({'type': 'log', 'message': 'TLS secured'});
+          }
+
+          mainSendPort.send({'type': 'log', 'message': 'Initializing SSH client...'});
+          sshClient = SSHClient(
+            RawSSHSocket(activeSocket!),
+            username: username,
+            onPasswordRequest: () => password,
+            keepAliveInterval: const Duration(seconds: 20),
+          );
+
+          mainSendPort.send({'type': 'log', 'message': 'Authenticating...'});
+          await sshClient!.authenticated.timeout(const Duration(seconds: 30));
+
+          if (isClosed) {
+            await cleanUp();
+            return;
+          }
+          mainSendPort.send({'type': 'log', 'message': 'SSH authenticated √'});
+
+          mainSendPort.send({'type': 'log', 'message': 'Starting SOCKS5 proxy on 127.0.0.1:$localPort...'});
+          forward = await sshClient!.forwardDynamic(
+            bindHost: '127.0.0.1',
+            bindPort: localPort,
+          ).timeout(const Duration(seconds: 10));
+
+          if (isClosed) {
+            await cleanUp();
+            return;
+          }
+          
+          mainSendPort.send({
+            'type': 'ready',
+            'port': forward!.port,
+          });
+
+          // مراقبة إغلاق الـ SSH
+          sshClient!.done.then((_) {
+            if (!isClosed) {
+              mainSendPort.send({'type': 'disconnected', 'message': 'Connection dropped unexpectedly!'});
+            }
+          }).catchError((e) {
+            if (!isClosed) {
+              mainSendPort.send({'type': 'disconnected', 'message': 'Connection error: $e'});
+            }
+          });
+
+          // مؤقت الـ Heartbeat/Keepalive داخل الـ Isolate
+          keepaliveTimer?.cancel();
+          keepaliveTimer = Timer.periodic(const Duration(seconds: 25), (_) async {
+            if (sshClient == null || isClosed) return;
+            try {
+              await sshClient!.ping().timeout(const Duration(seconds: 8));
+              mainSendPort.send({'type': 'log', 'message': 'Keepalive ✓'});
+            } catch (e) {
+              mainSendPort.send({'type': 'disconnected', 'message': 'Keepalive failed: $e'});
+            }
+          });
+
+        } catch (e) {
+          mainSendPort.send({'type': 'error', 'message': e.toString()});
+          await cleanUp();
+        }
+      } else if (action == 'stop') {
+        isClosed = true;
+        keepaliveTimer?.cancel();
+        keepaliveTimer = null;
+        try { activeSocket?.destroy(); } catch (_) {}
+        activeSocket = null;
+        try { await forward?.close(); } catch (_) {}
+        forward = null;
+        try { sshClient?.close(); } catch (_) {}
+        sshClient = null;
+        receivePort.close();
+        Isolate.current.kill();
+      }
+    }
+  });
 }
 
 // ──────────────────────────────────────────────

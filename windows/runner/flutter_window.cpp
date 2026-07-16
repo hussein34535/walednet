@@ -42,14 +42,17 @@ bool FlutterWindow::OnCreate() {
 
 void FlutterWindow::OnDestroy() {
   // Clean up VPN processes and delete Wintun routing rules on exit
-  ShellExecuteW(
-      NULL,
-      L"runas",
+  // App runs as Administrator, so CreateProcess inherits elevation
+  STARTUPINFOW si = { sizeof(si) };
+  PROCESS_INFORMATION pi;
+  CreateProcessW(
       L"powershell.exe",
       L"-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command \"taskkill /F /IM xray.exe; taskkill /F /IM tun2socks.exe; route delete 0.0.0.0 mask 128.0.0.0 192.168.123.1; route delete 128.0.0.0 mask 128.0.0.0 192.168.123.1\"",
-      NULL,
-      SW_HIDE
-  );
+      NULL, NULL, FALSE,
+      CREATE_NO_WINDOW,
+      NULL, NULL, &si, &pi);
+  if (pi.hProcess) CloseHandle(pi.hProcess);
+  if (pi.hThread) CloseHandle(pi.hThread);
 
   if (flutter_controller_) {
     flutter_controller_ = nullptr;

@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
@@ -100,6 +101,13 @@ class WindowsVpnManager {
 
       print('[WindowsVpnManager] Starting Xray...');
       _xrayProcess = await Process.start('$binPath\\xray.exe', ['-config', configFile.path]);
+      
+      _xrayProcess!.stdout.transform(utf8.decoder).listen((data) {
+        print('[Xray Core] $data');
+      });
+      _xrayProcess!.stderr.transform(utf8.decoder).listen((data) {
+        print('[Xray Error] $data');
+      });
     }
 
     print('[WindowsVpnManager] Starting tun2socks...');
@@ -143,10 +151,11 @@ class WindowsVpnManager {
     final tempScript = File('$binPath\\start_vpn.ps1');
     await tempScript.writeAsString(script);
     
-    // تشغيل السكريبت بالكامل كمسؤول
+    // تشغيل السكريبت (التطبيق يعمل كـ Administrator)
     await Process.run('powershell', [
-      '-Command',
-      'Start-Process powershell -ArgumentList "-ExecutionPolicy Bypass -File \`"${tempScript.path}\`"" -Verb RunAs -WindowStyle Hidden'
+      '-ExecutionPolicy', 'Bypass',
+      '-WindowStyle', 'Hidden',
+      '-File', tempScript.path,
     ]);
   }
 
@@ -170,10 +179,11 @@ class WindowsVpnManager {
     final tempScript = File('$binPath\\stop_vpn.ps1');
     await tempScript.writeAsString(script);
 
-    // تشغيل الحذف والإغلاق كمسؤول
+    // تشغيل السكريبت (التطبيق يعمل كـ Administrator)
     await Process.run('powershell', [
-      '-Command',
-      'Start-Process powershell -ArgumentList "-ExecutionPolicy Bypass -File \`"${tempScript.path}\`"" -Verb RunAs -WindowStyle Hidden'
+      '-ExecutionPolicy', 'Bypass',
+      '-WindowStyle', 'Hidden',
+      '-File', tempScript.path,
     ]);
     
     print('[WindowsVpnManager] VPN and routing fully stopped.');

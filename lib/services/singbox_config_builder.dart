@@ -6,10 +6,19 @@ class SingboxConfigBuilder {
     String? sni,
     String? sniProfileName,
     int sshLocalPort = 10809,
+    String? resolvedIp,
   }) {
     final isSsh = serverUrl.startsWith('ssh://');
-    final outbound = _buildOutbound(serverUrl, sni, sshLocalPort);
+    final isSlowDns = serverUrl.startsWith('slowdns://');
+    final outbound = _buildOutbound(serverUrl, sni, sshLocalPort, resolvedIp: resolvedIp);
     final serverHost = outbound['server'] as String?;
+
+    // Extract resolver IP for SlowDNS to avoid routing loop (TUN → proxy → resolver → TUN)
+    String? slowDnsResolverIp;
+    if (isSlowDns) {
+      final uri = Uri.parse(serverUrl);
+      slowDnsResolverIp = uri.queryParameters['dns_ip'];
+    }
 
     final config = {
       'log': {
@@ -41,7 +50,7 @@ class SingboxConfigBuilder {
             'server': 'dns-direct',
           },
         ],
-        'final': 'dns-proxy',
+        'final': isSsh || isSlowDns ? 'dns-direct' : 'dns-proxy',
         'strategy': 'ipv4_only',
       },
       'inbounds': [
@@ -72,14 +81,21 @@ class SingboxConfigBuilder {
         },
       ],
       'route': {
+        'auto_detect_interface': false,
         'rules': [
+          {
+            'port': [53],
+            'action': 'hijack-dns',
+          },
           {
             'action': 'sniff',
           },
-          {
-            'protocol': 'dns',
-            'action': 'hijack-dns',
-          },
+          // For SlowDNS: resolver IP bypasses VPN to avoid TUN loop
+          if (isSlowDns && slowDnsResolverIp != null && slowDnsResolverIp.isNotEmpty)
+            {
+              'ip_cidr': ['$slowDnsResolverIp/32'],
+              'outbound': 'direct',
+            },
           {
             'ip_is_private': true,
             'outbound': 'direct',
@@ -110,17 +126,49 @@ class SingboxConfigBuilder {
     return jsonEncode(config);
   }
 
-  static Map<String, dynamic> _buildOutbound(String url, String? sni, int sshLocalPort) {
+  static Map<String, dynamic> _buildOutbound(String url, String? sni, int sshLocalPort, {String? resolvedIp}) {
     if (url.startsWith('vless://')) {
-      return _buildVlessOutbound(url, sni);
+      return _buildVlessOutbound(url, sni, resolvedIp: resolvedIp);
     } else if (url.startsWith('vmess://')) {
-      return _buildVmessOutbound(url, sni);
+      return _buildVmessOutbound(url, sni, resolvedIp: resolvedIp);
     } else if (url.startsWith('ssh://')) {
       return _buildSshSocksOutbound(sshLocalPort);
     } else if (url.startsWith('trojan://')) {
-      return _buildTrojanOutbound(url, sni);
+      return _buildTrojanOutbound(url, sni, resolvedIp: resolvedIp);
+    } else if (url.startsWith('slowdns://')) {
+      return _buildSlowDnsOutbound(url, resolvedIp: resolvedIp);
     }
     throw Exception('Unsupported protocol: $url');
+  }
+
+  static Map<String, dynamic> _buildSlowDnsOutbound(String url, {String? resolvedIp}) {
+    final uri = Uri.parse(url);
+    final publicKey = uri.userInfo;
+    final domain = uri.host;
+    
+    // Read the DNS IP from URL (primary resolver = the dnstt server IP)
+    var dnsIp = uri.queryParameters['dns_ip'] ?? '';
+    if (dnsIp.isEmpty && resolvedIp != null && resolvedIp.isNotEmpty) {
+      dnsIp = resolvedIp;
+    }
+    if (dnsIp.isEmpty) {
+      dnsIp = '8.8.8.8'; // ultimate fallback
+    }
+    if (!dnsIp.contains(':')) {
+      dnsIp = '$dnsIp:53';
+    }
+
+    final resolvers = [dnsIp];
+
+    return {
+      'type': 'dnstt',
+      'tag': 'proxy',
+      'pubkey': publicKey,
+      'domain': domain,
+      'resolvers': resolvers,
+      'mtu': 130,
+      'record-type': 'cname',
+    };
   }
 
   static Map<String, dynamic> _buildSshSocksOutbound(int sshLocalPort) {
@@ -130,24 +178,25 @@ class SingboxConfigBuilder {
       'server': '127.0.0.1',
       'server_port': sshLocalPort,
       'version': '5',
-      'bind_interface': 'lo',
     };
   }
 
-  static Map<String, dynamic> _buildVlessOutbound(String url, String? sni) {
+  static Map<String, dynamic> _buildVlessOutbound(String url, String? sni, {String? resolvedIp}) {
     final uri = Uri.parse(url);
     final uuid = uri.userInfo;
-    final server = uri.host;
+    final server = resolvedIp ?? uri.host;
     final port = uri.port;
     final query = uri.queryParameters;
     final security = query['security'] ?? 'none';
     final type = query['type'] ?? 'tcp';
     
     // TLS SNI uses the whitelisted SNI if provided, otherwise the original SNI or host
-    final tlsSni = sni ?? query['sni'] ?? query['host'] ?? server;
+    final tlsSni = (sni != null && sni.isNotEmpty) ? sni : (query['sni'] ?? query['host'] ?? uri.host);
     
-    // WebSocket Host MUST be the original server domain, NOT the whitelisted SNI
-    final httpHost = query['host'] ?? query['sni'] ?? server;
+    final rawHost = query['host'] ?? query['sni'] ?? uri.host;
+    final httpHost = (sni != null && sni.isNotEmpty && (security != 'tls' || !uri.host.contains('waled.online')))
+        ? sni
+        : rawHost;
     final path = query['path'] ?? '/';
     final flow = query['flow'];
 
@@ -157,7 +206,8 @@ class SingboxConfigBuilder {
       'server': server,
       'server_port': port,
       'uuid': uuid,
-      'flow': flow,
+      'packet_encoding': 'xudp',
+      if (flow != null && flow.isNotEmpty) 'flow': flow,
     };
 
     if (security == 'tls') {
@@ -208,24 +258,28 @@ class SingboxConfigBuilder {
     return outbound;
   }
 
-  static Map<String, dynamic> _buildVmessOutbound(String url, String? sni) {
+  static Map<String, dynamic> _buildVmessOutbound(String url, String? sni, {String? resolvedIp}) {
     final base64Str = url.substring('vmess://'.length);
     String normalized = base64Str;
     final mod = base64Str.length % 4;
     if (mod > 0) normalized += '=' * (4 - mod);
     final json = jsonDecode(utf8.decode(base64.decode(normalized)));
 
-    final server = json['add'] as String;
-    final port = json['port'] as int;
+    final server = resolvedIp ?? json['add'] as String;
+    final port = int.parse(json['port'].toString());
     final uuid = json['id'] as String;
-    final aid = (json['aid'] ?? 0) as int;
+    final aid = int.parse((json['aid'] ?? 0).toString());
     final security = json['tls'] ?? '';
     final type = json['net'] ?? 'tcp';
     
-    // TLS SNI uses whitelisted SNI if provided, otherwise original SNI/host
-    final tlsSni = sni ?? json['sni'] ?? json['host'] ?? server;
-    // WebSocket Host MUST be the original server domain
-    final httpHost = json['host'] ?? json['sni'] ?? server;
+    final originalHost = json['add'] as String;
+    final String rawSni = (json['sni']?.toString() ?? json['host']?.toString() ?? '').trim();
+    final tlsSni = (sni != null && sni.isNotEmpty) ? sni : (rawSni.isNotEmpty ? rawSni : originalHost);
+    
+    final String rawHost = (json['host']?.toString() ?? json['sni']?.toString() ?? '').trim();
+    final httpHost = (sni != null && sni.isNotEmpty && (security != 'tls' || !originalHost.contains('waled.online')))
+        ? sni
+        : (rawHost.isNotEmpty ? rawHost : originalHost);
     final path = json['path'] ?? '/';
 
     final outbound = <String, dynamic>{
@@ -266,17 +320,17 @@ class SingboxConfigBuilder {
     return outbound;
   }
 
-  static Map<String, dynamic> _buildTrojanOutbound(String url, String? sni) {
+  static Map<String, dynamic> _buildTrojanOutbound(String url, String? sni, {String? resolvedIp}) {
     final uri = Uri.parse(url);
     final password = Uri.decodeComponent(uri.userInfo);
-    final server = uri.host;
+    final server = resolvedIp ?? uri.host;
     final port = uri.port;
     final query = uri.queryParameters;
     
     // TLS SNI uses whitelisted SNI if provided, otherwise original SNI
-    final tlsSni = sni ?? query['sni'] ?? server;
+    final tlsSni = (sni != null && sni.isNotEmpty) ? sni : (query['sni'] ?? uri.host);
     // WebSocket Host MUST be the original server domain
-    final httpHost = query['host'] ?? query['sni'] ?? server;
+    final httpHost = query['host'] ?? query['sni'] ?? uri.host;
     final type = query['type'] ?? 'tcp';
 
     final outbound = <String, dynamic>{
@@ -337,5 +391,101 @@ class SingboxConfigBuilder {
       print('Error parsing SSH URL: $e');
       return null;
     }
+  }
+
+  static String buildXrayConfig({
+    required String serverUrl,
+    String? sni,
+  }) {
+    final uri = Uri.parse(serverUrl);
+    final uuid = uri.userInfo;
+    final host = uri.host;
+    final port = uri.port;
+    final query = uri.queryParameters;
+    
+    final security = query['security'] ?? 'none';
+    final type = query['type'] ?? 'tcp';
+    
+    // Override SNI with the user's selected SNI if present
+    final tlsSni = sni ?? query['sni'] ?? query['host'] ?? host;
+    final wsHost = query['host'] ?? query['sni'] ?? host;
+    final path = query['path'] ?? '/';
+
+    final config = {
+      "log": {
+        "loglevel": "warning"
+      },
+      "inbounds": [
+        {
+          "port": 10808,
+          "listen": "127.0.0.1",
+          "protocol": "socks",
+          "settings": {
+            "udp": true
+          }
+        }
+      ],
+      "outbounds": [
+        {
+          "protocol": "vless",
+          "settings": {
+            "vnext": [
+              {
+                "address": host,
+                "port": port,
+                "users": [
+                  {
+                    "id": uuid,
+                    "encryption": "none"
+                  }
+                ]
+              }
+            ]
+          },
+          "streamSettings": {
+            "network": type,
+            "security": security,
+            if (security == 'tls')
+              "tlsSettings": {
+                "serverName": tlsSni
+              },
+            if (security == 'reality')
+              "realitySettings": {
+                "show": false,
+                "fingerprint": query['fp'] ?? "chrome",
+                "serverName": tlsSni,
+                "publicKey": query['pbk'] ?? "",
+                "shortId": query['sid'] ?? "",
+                "spiderX": ""
+              },
+            if (type == 'ws')
+              "wsSettings": {
+                "path": path,
+                "headers": {
+                  "Host": wsHost
+                }
+              }
+          }
+        }
+      ]
+    };
+
+    return jsonEncode(config);
+  }
+
+  static String? getServerHost(String url) {
+    try {
+      if (url.startsWith('vmess://')) {
+        final base64Str = url.substring('vmess://'.length);
+        String normalized = base64Str;
+        final mod = base64Str.length % 4;
+        if (mod > 0) normalized += '=' * (4 - mod);
+        final json = jsonDecode(utf8.decode(base64.decode(normalized)));
+        return json['add'] as String?;
+      } else if (url.startsWith('vless://') || url.startsWith('trojan://') || url.startsWith('ssh://') || url.startsWith('slowdns://')) {
+        return Uri.parse(url).host;
+      }
+    } catch (_) {}
+    return null;
   }
 }

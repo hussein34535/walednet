@@ -46,6 +46,37 @@ class VpnServer {
     String configUrl = json['url']?.toString() ??
         json['config']?.toString() ??
         ''; // Prioritize 'url' from cache, then 'config' from API
+
+    // Normalize SSH configs that do not start with ssh://
+    if ((json['type'] == 'SSH' || json['type'] == 'ssh') && !configUrl.startsWith('ssh://')) {
+      final ip = json['ip_address']?.toString() ?? '';
+      final user = json['username']?.toString() ?? '';
+      final pass = json['password']?.toString() ?? '';
+      
+      String port = '443'; // Default port for SSH TLS
+      if (configUrl.contains(':')) {
+        final beforeAt = configUrl.split('@')[0];
+        final parts = beforeAt.split(':');
+        if (parts.length > 1) {
+          port = parts[1];
+        }
+      }
+      
+      if (ip.isNotEmpty && user.isNotEmpty && pass.isNotEmpty) {
+        configUrl = 'ssh://$user:$pass@$ip:$port?ssl=${port == '443' ? 'true' : 'false'}';
+      }
+    }
+
+    // Normalize SlowDNS configs
+    if ((json['type'] == 'SLOWDNS' || json['type'] == 'slowdns') && !configUrl.startsWith('slowdns://')) {
+      final pubKey = json['public_key']?.toString() ?? '';
+      final ns = json['ns']?.toString() ?? '';
+      final dnsIp = json['dns_ip']?.toString() ?? '';
+      if (pubKey.isNotEmpty && ns.isNotEmpty) {
+        configUrl = 'slowdns://$pubKey@$ns?dns_ip=$dnsIp';
+      }
+    }
+
     String serverName = json['server_name']?.toString() ??
         json['name']?.toString() ??
         'Unnamed Server'; // Prioritize 'server_name' from API, then 'name' from cache
@@ -80,16 +111,7 @@ class VpnServer {
       };
 }
 
-// The static lists below will be replaced by API calls.
-// They are kept here temporarily to avoid breaking the UI during development.
-final allSniProfiles = <SniProfile>[
-  SniProfile(
-    name: 'Loading...',
-    sni: '',
-    icon: 'assets/images/app.svg', // Placeholder icon
-  ),
-];
+// Fallback lists when API calls are unavailable or unauthorized
+final allSniProfiles = <SniProfile>[];
 
-final allServers = <VpnServer>[
-  VpnServer(name: 'Loading...', url: '', icon: 'assets/images/server.svg'),
-];
+final allServers = <VpnServer>[];

@@ -1,15 +1,19 @@
 package com.waled.net
 
+import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.net.VpnService
 import android.util.Log
 import io.flutter.embedding.engine.plugins.FlutterPlugin
+import io.flutter.embedding.engine.plugins.activity.ActivityAware
+import io.flutter.embedding.engine.plugins.activity.ActivityPluginBinding
 import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 
-class VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
+class VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, ActivityAware,
+    io.flutter.plugin.common.PluginRegistry.ActivityResultListener {
 
     companion object {
         private const val TAG = "WaledPlugin"
@@ -17,13 +21,46 @@ class VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         private const val STATUS_EVENT_CHANNEL = "waled_net/status"
         private const val TRAFFIC_EVENT_CHANNEL = "waled_net/traffic"
         private const val LOG_EVENT_CHANNEL = "waled_net/logs"
+        private const val VPN_PREPARE_REQUEST = 9001
     }
 
     private var context: Context? = null
+    private var activity: Activity? = null
     private var methodChannel: MethodChannel? = null
     private var statusEventChannel: EventChannel? = null
     private var trafficEventChannel: EventChannel? = null
     private var logEventChannel: EventChannel? = null
+    private var pendingPrepareResult: MethodChannel.Result? = null
+
+    override fun onAttachedToActivity(binding: ActivityPluginBinding) {
+        activity = binding.activity
+        binding.addActivityResultListener(this)
+        Log.i(TAG, "Activity attached to VpnPlugin")
+    }
+
+    override fun onDetachedFromActivityForConfigChanges() {
+        activity = null
+    }
+
+    override fun onReattachedToActivityForConfigChanges(binding: ActivityPluginBinding) {
+        activity = binding.activity
+        binding.addActivityResultListener(this)
+    }
+
+    override fun onDetachedFromActivity() {
+        activity = null
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?): Boolean {
+        if (requestCode == VPN_PREPARE_REQUEST) {
+            val granted = resultCode == Activity.RESULT_OK
+            Log.i(TAG, "VPN prepare result: granted=$granted")
+            pendingPrepareResult?.success(granted)
+            pendingPrepareResult = null
+            return true
+        }
+        return false
+    }
 
     override fun onAttachedToEngine(binding: FlutterPlugin.FlutterPluginBinding) {
         context = binding.applicationContext
@@ -79,7 +116,22 @@ class VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                     result.error("NO_CONTEXT", "Context is null", null); return
                 }
                 val intent = VpnService.prepare(ctx)
-                result.success(intent == null)
+                if (intent != null) {
+                    // Launch the VPN permission intent and wait for result
+                    val act = activity ?: run {
+                        result.success(false); return
+                    }
+                    try {
+                        pendingPrepareResult = result
+                        act.startActivityForResult(intent, VPN_PREPARE_REQUEST)
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Failed to launch VPN prepare intent: ${e.message}")
+                        pendingPrepareResult = null
+                        result.success(false)
+                    }
+                } else {
+                    result.success(true)
+                }
             }
             "start" -> {
                 val config = call.argument<String>("config") ?: run {
@@ -147,6 +199,7 @@ class VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         logEventChannel?.setStreamHandler(null)
         logEventChannel = null
         context = null
+        activity = null
         Log.i(TAG, "VpnPlugin detached")
     }
 }
