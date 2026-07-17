@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 import 'package:http/http.dart' as http;
 import 'package:crypto/crypto.dart';
 import '../data/servers.dart';
@@ -10,7 +11,9 @@ class ApiService {
   static const String _vmessUrl = 'https://waledapis.vercel.app/api/vmess';
   static const String _slowDnsUrl = 'https://waledapis.vercel.app/api/slowdns';
 
-  static const String _secret = 'sk_wp_ffaf63dd7ee834efb691957c771998a29e9ae6b6dbc3c401efcfab1e9d886f05';
+  // TODO: Rotate this secret on the server. Current one is exposed.
+  // Move to server-side verification + rate limiting / Play Integrity.
+  static const String _secret = 'sk_wp_2651d07e90ef42773428096a1b2cc5bce48eb1d34646bd3fa4dd55531bd7b38c';
 
   static const Map<String, String> _headers = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -34,10 +37,20 @@ class ApiService {
     return headers;
   }
 
+  static Future<void> _logApi(String endpoint, int status, String body) async {
+    try {
+      await File(r'D:\WALEDNET\build\api_log.txt').writeAsString(
+        '[${DateTime.now()}] $endpoint → $status\nBody: ${body.length > 2000 ? body.substring(0, 2000) : body}\n---\n',
+        mode: FileMode.append,
+      );
+    } catch (_) {}
+  }
+
   static Future<List<SniProfile>> fetchSniProfiles() async {
     try {
       final headers = await _getHeaders();
       final response = await http.get(Uri.parse(_sniUrl), headers: headers);
+      await _logApi('SNI', response.statusCode, utf8.decode(response.bodyBytes));
       if (response.statusCode == 200) {
         final String responseBody = utf8.decode(response.bodyBytes);
         final List<dynamic> data = jsonDecode(responseBody);
@@ -55,6 +68,7 @@ class ApiService {
     try {
       final headers = await _getHeaders();
       final response = await http.get(Uri.parse(_vlessUrl), headers: headers);
+      await _logApi('VLESS', response.statusCode, utf8.decode(response.bodyBytes));
       if (response.statusCode == 200) {
         final String responseBody = utf8.decode(response.bodyBytes);
         final List<dynamic> data = jsonDecode(responseBody);
@@ -72,30 +86,23 @@ class ApiService {
   }
 
   static Future<List<VpnServer>> fetchSshServers() async {
-    // Manual SSH server for testing
-    final manualServer = VpnServer(
-      name: 'Root SSH Test',
-      url: 'ssh://root:${Uri.encodeComponent("?AM.81#Hs-LjVfG;\'P0f")}@187.127.107.105:443?ssl=true',
-      icon: 'assets/images/server.svg',
-    );
-
     try {
       final headers = await _getHeaders();
       final response = await http.get(Uri.parse(_sshUrl), headers: headers);
+      await _logApi('SSH', response.statusCode, utf8.decode(response.bodyBytes));
       if (response.statusCode == 200) {
         final String responseBody = utf8.decode(response.bodyBytes);
         final List<dynamic> data = jsonDecode(responseBody);
-        final servers = data
+        return data
             .map((json) => VpnServer.fromJson(json))
             .where((server) => server.url.isNotEmpty && server.url.startsWith('ssh://'))
             .toList();
-        return [manualServer, ...servers];
       } else {
-        return [manualServer];
+        throw Exception('Failed to load SSH servers: status code ${response.statusCode}');
       }
     } catch (e) {
       print('Error fetching SSH servers: $e');
-      return [manualServer];
+      return [];
     }
   }
 
@@ -103,6 +110,7 @@ class ApiService {
     try {
       final headers = await _getHeaders();
       final response = await http.get(Uri.parse(_vmessUrl), headers: headers);
+      await _logApi('VMESS', response.statusCode, utf8.decode(response.bodyBytes));
       if (response.statusCode == 200) {
         final String responseBody = utf8.decode(response.bodyBytes);
         final List<dynamic> data = jsonDecode(responseBody);
@@ -120,37 +128,23 @@ class ApiService {
   }
 
   static Future<List<VpnServer>> fetchSlowDnsServers() async {
-    // Manually add SlowDNS servers for testing
-    final testServer = VpnServer(
-      name: 'Test Manual SlowDNS',
-      url: 'slowdns://cb296a077536ccf833fbb33d27aa02171cfd9b7c95c54f7fa585803d51e6f032@tns.waledssl.blog?dns_ip=105.203.254.140',
-      icon: 'assets/images/server.svg',
-    );
-    final newServer = VpnServer(
-      name: 'New Server Test',
-      url: 'slowdns://c79371dde3413656fa22a7c1b7c2736bde6688e1cac6d710faeb5c4d9f09c508@tns.waledssl.blog?dns_ip=187.127.107.105',
-      icon: 'assets/images/server.svg',
-    );
-
     try {
       final headers = await _getHeaders();
       final response = await http.get(Uri.parse(_slowDnsUrl), headers: headers);
+      await _logApi('SLOWDNS', response.statusCode, utf8.decode(response.bodyBytes));
       if (response.statusCode == 200) {
         final String responseBody = utf8.decode(response.bodyBytes);
         final List<dynamic> data = jsonDecode(responseBody);
-        final servers = data
+        return data
             .map((json) => VpnServer.fromJson(json))
             .where((server) => server.url.isNotEmpty && server.url.startsWith('slowdns://'))
             .toList();
-        
-        // Add test servers to the top of the list
-        return [newServer, testServer, ...servers];
       } else {
-        return [newServer, testServer];
+        throw Exception('Failed to load SlowDNS servers: status code ${response.statusCode}');
       }
     } catch (e) {
       print('Error fetching SlowDNS servers: $e');
-      return [newServer, testServer];
+      return [];
     }
   }
 

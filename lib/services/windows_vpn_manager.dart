@@ -83,6 +83,16 @@ class WindowsVpnManager {
   /// تشغيل الـ VPN
   /// بالنسبة للـ VLESS سيقوم بتشغيل xray وتوجيه tun2socks لمنفذه (10808)
   /// بالنسبة للـ SSH سيتصل tun2socks بمنفذ النفق (10809)
+  /// Ensures the app is running with admin privileges.
+  static Future<bool> get isAdmin async {
+    try {
+      final result = await Process.run('whoami', ['/groups']);
+      return result.stdout.toString().contains('S-1-16-12288');
+    } catch (_) {
+      return false;
+    }
+  }
+
   static Future<void> startVpn({
     required String type,
     required String serverIp,
@@ -92,10 +102,10 @@ class WindowsVpnManager {
 
     final binPath = await _binDir;
     
-    int socksPort = 10809; // Default for SSH SOCKS5
+    int socksPort = 10809;
 
     if (type.toLowerCase() == 'vless' && xrayConfigJson != null) {
-      socksPort = 10808; // Xray port
+      socksPort = 10808;
       final configFile = File('$binPath\\config.json');
       await configFile.writeAsString(xrayConfigJson);
 
@@ -108,40 +118,62 @@ class WindowsVpnManager {
       _xrayProcess!.stderr.transform(utf8.decoder).listen((data) {
         print('[Xray Error] $data');
       });
+
+      // Health check: wait 2s, then probe SOCKS5 port
+      await Future.delayed(const Duration(seconds: 2));
+      try {
+        final probe = await Socket.connect('127.0.0.1', socksPort,
+            timeout: const Duration(seconds: 2));
+        probe.destroy();
+      } catch (_) {
+        _xrayProcess?.kill();
+        _xrayProcess = null;
+        try { await configFile.delete(); } catch (_) {}
+        throw Exception('Xray health check failed: SOCKS5 port $socksPort not reachable');
+      }
+      print('[WindowsVpnManager] Xray health check passed.');
     }
 
     print('[WindowsVpnManager] Starting tun2socks...');
     final tun2socksPath = '$binPath\\tun2socks.exe';
     
-    // سكريبت يتم تشغيله بالكامل كمسؤول (RunAs) لضبط كارت الشبكة ومسارات التوجيه
     final script = '''
       Start-Transcript -Path "$binPath\\vpn_route_log.txt" -Force
+
+      # 0. Resolve server IP if it is a hostname
+      \$serverIp = "$serverIp"
+      if (\$serverIp -notmatch '^\\d+\\.\\d+\\.\\d+\\.\\d+\$') {
+          try {
+              \$resolved = [System.Net.Dns]::GetHostAddresses(\$serverIp) | Select-Object -First 1
+              if (\$resolved) { \$serverIp = \$resolved.IPAddressToString }
+          } catch {
+              Write-Warning "Could not resolve \$serverIp via DNS"
+          }
+      }
       
       # 1. تشغيل tun2socks بالخلفية
       Start-Process -FilePath "$tun2socksPath" -WorkingDirectory "$binPath" -ArgumentList "-device wintun -proxy socks5://127.0.0.1:$socksPort" -WindowStyle Hidden
       
-      # الانتظار لتهيئة كارت الشبكة الوهمي
       Start-Sleep -Seconds 4
       
       # 2. تعيين عنوان IP لكارت الشبكة الوهمي (wintun)
       netsh interface ipv4 set address name="wintun" source=static addr=192.168.123.1 mask=255.255.255.0
       
-      # 3. تعيين DNS لمنع التسريب مع تجاوز التحقق
+      # 3. تعيين DNS لمنع التسريب
       netsh interface ipv4 set dns name="wintun" source=static addr=1.1.1.1 register=primary validate=no
       
-      # 4. رفع أولوية كارت الشبكة الوهمي عبر تقليل الـ Metric
+      # 4. رفع أولوية كارت الشبكة الوهمي
       netsh interface ipv4 set interface "wintun" metric=5
       
-      # الحصول على مؤشر كارت الشبكة الوهمي (Interface Index)
       \$wintunIndex = (Get-NetIPInterface -InterfaceAlias "wintun" -AddressFamily IPv4).InterfaceIndex
 
-      # 5. استثناء خادم الـ VPN لمنع حدوث Routing Loop
+      # 5. استثناء خادم الـ VPN
       \$gateway = (Get-NetRoute -DestinationPrefix "0.0.0.0/0" | Sort-Object RouteMetric | Select-Object -ExpandProperty NextHop -First 1)
       if (\$gateway) {
-          route add $serverIp mask 255.255.255.255 \$gateway metric 1
+          route add \$serverIp mask 255.255.255.255 \$gateway metric 1
       }
 
-      # 6. إضافة مسارات توجيه نصف الإنترنت لشفط كافة الاتصالات بالتأكيد عبر مؤشر كارت wintun
+      # 6. مسارات التوجيه
       route add 0.0.0.0 mask 128.0.0.0 192.168.123.1 metric 1 IF \$wintunIndex
       route add 128.0.0.0 mask 128.0.0.0 192.168.123.1 metric 1 IF \$wintunIndex
 
@@ -151,7 +183,6 @@ class WindowsVpnManager {
     final tempScript = File('$binPath\\start_vpn.ps1');
     await tempScript.writeAsString(script);
     
-    // تشغيل السكريبت (التطبيق يعمل كـ Administrator)
     await Process.run('powershell', [
       '-ExecutionPolicy', 'Bypass',
       '-WindowStyle', 'Hidden',

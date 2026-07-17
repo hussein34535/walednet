@@ -310,16 +310,14 @@ class VpnProvider with ChangeNotifier {
 
     print("[_loadData] Starting data load process.");
 
-    bool fetchedFromApi = false;
+    bool serversOk = false;
+    bool profilesOk = false;
     try {
       print("[_loadData] Attempting to fetch new data from server...");
       final servers = await ApiService.fetchVlessServers();
       final vmessServers = await ApiService.fetchVmessServers();
       final sshServers = await ApiService.fetchSshServers();
       final slowDnsServers = await ApiService.fetchSlowDnsServers();
-      final profiles = await ApiService.fetchSniProfiles();
-
-      // Robustly set whatever data we successfully fetched
       if (servers.isNotEmpty || vmessServers.isNotEmpty || sshServers.isNotEmpty || slowDnsServers.isNotEmpty) {
         _vpnServers = [
           ...servers,
@@ -327,28 +325,39 @@ class VpnProvider with ChangeNotifier {
           ...sshServers,
           ...slowDnsServers,
         ];
-        fetchedFromApi = true;
+        serversOk = true;
       }
+    } catch (e) {
+      print("[_loadData] Servers API fetch failed: $e");
+    }
+
+    if (!serversOk) {
+      print("[_loadData] Servers API failed; falling back to cache for servers.");
+      await _loadServersFromCache();
+    }
+
+    try {
+      final profiles = await ApiService.fetchSniProfiles();
       if (profiles.isNotEmpty) {
         _sniProfiles = [
           SniProfile(name: 'Direct / None (بدون SNI)', sni: ''),
           ...profiles,
         ];
-        fetchedFromApi = true;
-      }
-
-      if (fetchedFromApi) {
-        await _saveDataToCache();
-        await prefs.setInt('last_fetch_time', currentTime);
-        print("[_loadData] Data fetched from API and saved to cache.");
+        profilesOk = true;
       }
     } catch (e) {
-      print("[_loadData] API fetch failed: $e");
+      print("[_loadData] Profiles API fetch failed: $e");
     }
 
-    if (!fetchedFromApi) {
-      print("[_loadData] Fetching from cache fallback...");
-      await _loadDataFromCache();
+    if (!profilesOk) {
+      print("[_loadData] Profiles API failed; falling back to cache for profiles.");
+      await _loadProfilesFromCache();
+    }
+
+    if (serversOk || profilesOk) {
+      await _saveDataToCache();
+      await prefs.setInt('last_fetch_time', currentTime);
+      print("[_loadData] Data fetched from API and saved to cache.");
     }
 
 
@@ -388,23 +397,28 @@ class VpnProvider with ChangeNotifier {
     print("[_saveDataToCache] Cache saved successfully.");
   }
 
-  Future<void> _loadDataFromCache() async {
+  Future<void> _loadServersFromCache() async {
     final prefs = await SharedPreferences.getInstance();
     final serversStr = prefs.getString('cached_servers');
-    final profilesStr = prefs.getString('cached_profiles');
-
-    if (serversStr != null && profilesStr != null) {
+    if (serversStr != null) {
       final List<dynamic> serversList = jsonDecode(serversStr);
-      final List<dynamic> profilesList = jsonDecode(profilesStr);
-
       _vpnServers = serversList.map((s) => VpnServer.fromJson(s)).toList();
+      print("[_loadServersFromCache] Loaded servers from cache.");
+    }
+  }
+
+  Future<void> _loadProfilesFromCache() async {
+    final prefs = await SharedPreferences.getInstance();
+    final profilesStr = prefs.getString('cached_profiles');
+    if (profilesStr != null) {
+      final List<dynamic> profilesList = jsonDecode(profilesStr);
       final profiles = profilesList.map((p) => SniProfile.fromJson(p)).toList();
       final hasDirect = profiles.any((p) => p.sni.isEmpty);
       _sniProfiles = hasDirect ? profiles : [
         SniProfile(name: 'Direct / None (بدون SNI)', sni: ''),
         ...profiles,
       ];
-      print("[_loadDataFromCache] Loaded data from cache successfully.");
+      print("[_loadProfilesFromCache] Loaded profiles from cache.");
     }
   }
 
@@ -413,7 +427,7 @@ class VpnProvider with ChangeNotifier {
     final savedServerUrl = prefs.getString('selected_server_url');
     final savedProfileSni = prefs.getString('selected_profile_sni');
     print("[_loadSelections] Attempting to load saved selections.");
-    print("[_loadSelections] Saved Server URL: $savedServerUrl");
+    print("[_loadSelections] Saved Server URL: ${savedServerUrl != null ? '[redacted]' : 'null'}");
     print("[_loadSelections] Saved Profile SNI: $savedProfileSni");
 
     if (savedServerUrl != null && _vpnServers.isNotEmpty) {
@@ -583,6 +597,12 @@ class VpnProvider with ChangeNotifier {
           notifyListeners();
           return;
         }
+      } else if (serverUrl.startsWith('slowdns://')) {
+        _addLog('[System] SlowDNS protocol is not supported on Windows. Showing error message.');
+        _vpnStatus = 'DISCONNECTED';
+        _buttonText = 'اتصال';
+        notifyListeners();
+        return;
       } else {
         // VLESS / VMESS / Trojan logic on Windows!
         _addLog('[System] VLESS mode detected on Windows. Building Xray config...');

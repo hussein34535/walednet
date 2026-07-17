@@ -1,5 +1,3 @@
-import 'dart:convert';
-
 class SniProfile {
   final String name;
   final String sni;
@@ -12,14 +10,11 @@ class SniProfile {
   });
 
   factory SniProfile.fromJson(Map<String, dynamic> json) {
-    print('[SniProfile.fromJson] Input JSON: $json');
     String parsedName =
         json['name']?.toString() ?? json['id']?.toString() ?? 'Unnamed Profile';
     String parsedSni =
         json['sni']?.toString() ?? json['host']?.toString() ?? '';
     String parsedIcon = json['icon']?.toString() ?? 'assets/images/server.svg';
-    print(
-        '[SniProfile.fromJson] Parsed - Name: $parsedName, SNI: $parsedSni, Icon: $parsedIcon');
     return SniProfile(
       name: parsedName,
       sni: parsedSni,
@@ -42,32 +37,24 @@ class VpnServer {
   VpnServer({required this.name, required this.url, required this.icon});
 
   factory VpnServer.fromJson(Map<String, dynamic> json) {
-    print('[VpnServer.fromJson] Input JSON: $json');
     String configUrl = json['url']?.toString() ??
-        json['config']?.toString() ??
-        ''; // Prioritize 'url' from cache, then 'config' from API
+        json['config']?.toString() ?? '';
 
-    // Normalize SSH configs that do not start with ssh://
     if ((json['type'] == 'SSH' || json['type'] == 'ssh') && !configUrl.startsWith('ssh://')) {
       final ip = json['ip_address']?.toString() ?? '';
       final user = json['username']?.toString() ?? '';
       final pass = json['password']?.toString() ?? '';
-      
-      String port = '443'; // Default port for SSH TLS
+      String port = '443';
       if (configUrl.contains(':')) {
         final beforeAt = configUrl.split('@')[0];
         final parts = beforeAt.split(':');
-        if (parts.length > 1) {
-          port = parts[1];
-        }
+        if (parts.length > 1) port = parts[1];
       }
-      
       if (ip.isNotEmpty && user.isNotEmpty && pass.isNotEmpty) {
         configUrl = 'ssh://$user:$pass@$ip:$port?ssl=${port == '443' ? 'true' : 'false'}';
       }
     }
 
-    // Normalize SlowDNS configs
     if ((json['type'] == 'SLOWDNS' || json['type'] == 'slowdns') && !configUrl.startsWith('slowdns://')) {
       final pubKey = json['public_key']?.toString() ?? '';
       final ns = json['ns']?.toString() ?? '';
@@ -79,9 +66,8 @@ class VpnServer {
 
     String serverName = json['server_name']?.toString() ??
         json['name']?.toString() ??
-        'Unnamed Server'; // Prioritize 'server_name' from API, then 'name' from cache
+        'Unnamed Server';
 
-    // Fallback to URL fragment or host if 'name' from cache is not available
     if (serverName == 'Unnamed Server' && configUrl.isNotEmpty) {
       try {
         final uri = Uri.parse(configUrl);
@@ -91,12 +77,10 @@ class VpnServer {
           serverName = uri.host.isNotEmpty ? uri.host : 'Unnamed Server';
         }
       } catch (e) {
-        print("[VpnServer.fromJson] Error parsing URL for name: $e");
+        // keep default name
       }
     }
     String parsedIcon = json['icon']?.toString() ?? 'assets/images/server.svg';
-    print(
-        '[VpnServer.fromJson] Parsed - Name: $serverName, URL: $configUrl, Icon: $parsedIcon');
     return VpnServer(
       name: serverName,
       url: configUrl,
