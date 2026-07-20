@@ -13,10 +13,10 @@ class GoogleWindowsAuth {
       'https://oauth2.googleapis.com/token';
   static const String _authEndpoint =
       'https://accounts.google.com/o/oauth2/v2/auth';
+  static const int _port = 8080;
 
   static Future<String?> signIn() async {
-    final port = await _findFreePort();
-    final redirectUri = 'http://localhost:$port';
+    final redirectUri = 'http://localhost:$_port';
     final state = _generateState();
 
     final authUrl = Uri.parse(_authEndpoint).replace(queryParameters: {
@@ -29,7 +29,7 @@ class GoogleWindowsAuth {
       'prompt': 'select_account',
     });
 
-    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, port);
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, _port);
     final codeCompleter = Completer<String>();
 
     unawaited(
@@ -50,13 +50,6 @@ class GoogleWindowsAuth {
     } finally {
       server.close();
     }
-  }
-
-  static Future<int> _findFreePort() async {
-    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
-    final port = server.port;
-    await server.close();
-    return port;
   }
 
   static String _generateState() {

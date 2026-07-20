@@ -9,6 +9,7 @@ import 'package:WaledNet/providers/vpn_provider.dart';
 import 'package:WaledNet/providers/auth_provider.dart';
 import 'package:WaledNet/screens/update_check_page.dart';
 import 'package:WaledNet/screens/login_screen.dart';
+import 'package:WaledNet/screens/account_screen.dart';
 import 'package:WaledNet/screens/home_page.dart';
 import 'package:WaledNet/services/subscription_service.dart';
 import 'package:WaledNet/firebase_options.dart';
@@ -80,6 +81,7 @@ class VpnApp extends StatelessWidget {
         '/': (context) => const UpdateCheckPage(),
         '/login': (context) => const LoginScreen(),
         '/home': (context) => const MyHomePage(),
+        '/account': (context) => const AccountScreen(),
       },
     );
   }

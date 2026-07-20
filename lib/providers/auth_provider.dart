@@ -130,6 +130,28 @@ class AuthProvider with ChangeNotifier {
     }
   }
 
+  Future<void> reauthenticate(String password) async {
+    if (_auth == null || _user == null || _user!.email == null) return;
+    final credential = EmailAuthProvider.credential(
+      email: _user!.email!,
+      password: password,
+    );
+    await _user!.reauthenticateWithCredential(credential);
+  }
+
+  Future<void> changePassword(String newPassword) async {
+    if (_auth == null || _user == null) return;
+    await _user!.updatePassword(newPassword);
+  }
+
+  Future<void> deleteAccount() async {
+    if (_auth == null || _user == null) return;
+    await _user!.delete();
+    _user = null;
+    await _saveLogin(false);
+    notifyListeners();
+  }
+
   Future<void> signOut() async {
     if (_auth == null) return;
     await _auth?.signOut();

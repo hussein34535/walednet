@@ -15,6 +15,7 @@ import '../widgets/connect_button.dart';
 import '../widgets/connection_status_card.dart';
 import '../widgets/subscription_dialog.dart';
 import '../services/windows_vpn_manager.dart';
+import 'account_screen.dart';
 import 'logs_page.dart';
 
 class MyHomePage extends StatefulWidget {
@@ -196,87 +197,12 @@ class _MyHomePageState extends State<MyHomePage>
       backgroundColor: Colors.transparent,
       elevation: 0,
       centerTitle: true,
-      leading: PopupMenuButton<String>(
-        onSelected: (value) {
-          if (value == 'contact_us') {
-            _launchUrl(_telegramUrl);
-          } else if (value == 'subscribe') {
-            _launchUrl(_subscriptionUrl);
-          } else if (value == 'theme') {
-            themeProvider.toggleTheme();
-          }
-        },
-        icon: Icon(Icons.menu_rounded, color: theme.iconTheme.color, size: 28),
-        color: theme.cardTheme.color,
-        elevation: 10,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(20),
-          side: BorderSide(
-            color: themeProvider.isDarkMode
-                ? Colors.white.withOpacity(0.08)
-                : Colors.black.withOpacity(0.05),
-            width: 1.5,
-          ),
+      leading: IconButton(
+        icon: Icon(Icons.person_rounded, color: theme.iconTheme.color, size: 28),
+        onPressed: () => Navigator.push(
+          context,
+          MaterialPageRoute(builder: (context) => const AccountScreen()),
         ),
-        itemBuilder: (BuildContext context) => <PopupMenuEntry<String>>[
-          PopupMenuItem<String>(
-            value: 'contact_us',
-            child: Row(
-              children: [
-                const Icon(
-                  Icons.contact_support_outlined,
-                  color: Color(0xFF007AFF), // iOS Blue
-                ),
-                const SizedBox(width: 12),
-                Text(
-                  'تواصل معنا',
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          PopupMenuItem<String>(
-            value: 'subscribe',
-            child: Row(
-              children: [
-                const Icon(
-                  Icons.workspace_premium_outlined,
-                  color: Color(0xFFFF9500), // iOS Orange
-                ),
-                const SizedBox(width: 12),
-                Text(
-                  'اشتراك (بدون إعلانات)',
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          PopupMenuDivider(),
-          PopupMenuItem<String>(
-            value: 'theme',
-            child: Row(
-              children: [
-                Icon(
-                  themeProvider.isDarkMode
-                      ? Icons.light_mode_rounded
-                      : Icons.dark_mode_rounded,
-                  color: const Color(0xFFFF9500),
-                ),
-                const SizedBox(width: 12),
-                Text(
-                  themeProvider.isDarkMode ? 'الوضع النهاري' : 'الوضع الليلي',
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
       ),
       title: Text(
         'WaledNet',
