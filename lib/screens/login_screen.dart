@@ -1,6 +1,7 @@
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:provider/provider.dart';
 import 'package:WaledNet/providers/auth_provider.dart';
 import 'package:WaledNet/theme_provider.dart';
@@ -31,7 +32,6 @@ class _LoginScreenState extends State<LoginScreen>
   late AnimationController _shakeController;
 
   late Animation<double> _logoScale;
-  late Animation<double> _logoGlow;
   late Animation<double> _bgAnim;
   late Animation<double> _shakeAnim;
 
@@ -75,9 +75,6 @@ class _LoginScreenState extends State<LoginScreen>
     _logoScale = Tween<double>(begin: 1.0, end: 1.06).animate(
       CurvedAnimation(parent: _logoController, curve: Curves.easeInOut),
     );
-    _logoGlow = Tween<double>(begin: 0.3, end: 0.7).animate(
-      CurvedAnimation(parent: _logoController, curve: Curves.easeInOut),
-    );
 
     _shakeController = AnimationController(
       vsync: this,
@@ -107,6 +104,14 @@ class _LoginScreenState extends State<LoginScreen>
 
     Future.delayed(const Duration(milliseconds: 200), () {
       if (mounted) _entranceController.forward();
+    });
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final auth = Provider.of<AuthProvider>(context, listen: false);
+      if (auth.isLoggedIn) {
+        Navigator.of(context).pushReplacementNamed('/home');
+      }
     });
   }
 
@@ -208,10 +213,6 @@ class _LoginScreenState extends State<LoginScreen>
                       SizedBox(height: size.height * 0.01),
                       _buildSubtitle(theme, isDark),
                       SizedBox(height: size.height * 0.045),
-                      _buildSocialButtons(theme, isDark, auth),
-                      SizedBox(height: size.height * 0.025),
-                      _buildDivider(theme, isDark),
-                      SizedBox(height: size.height * 0.025),
                       if (auth.errorMessage != null)
                         _buildError(auth.errorMessage!, isDark),
                       _buildForm(theme, isDark),
@@ -219,6 +220,10 @@ class _LoginScreenState extends State<LoginScreen>
                       if (_isLogin) _buildForgotPassword(theme, isDark),
                       SizedBox(height: size.height * 0.025),
                       _buildSubmitButton(theme, isDark, auth),
+                      SizedBox(height: size.height * 0.025),
+                      _buildDivider(theme, isDark),
+                      SizedBox(height: size.height * 0.025),
+                      _buildGoogleButton(theme, isDark, auth),
                       SizedBox(height: size.height * 0.02),
                       _buildToggle(theme, isDark),
                       SizedBox(height: size.height * 0.04),
@@ -262,41 +267,20 @@ class _LoginScreenState extends State<LoginScreen>
               child: child,
             );
           },
-          child: AnimatedBuilder(
-            animation: _logoGlow,
-            builder: (context, child) {
-              return Container(
-                width: 88,
-                height: 88,
-                decoration: BoxDecoration(
-                  gradient: const LinearGradient(
-                    colors: [Color(0xFF0A84FF), Color(0xFF10B981)],
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                  ),
-                  borderRadius: BorderRadius.circular(26),
-                  boxShadow: [
-                    BoxShadow(
-                      color: const Color(0xFF0A84FF).withOpacity(_logoGlow.value),
-                      blurRadius: 40,
-                      spreadRadius: 4,
-                      offset: const Offset(0, 8),
-                    ),
-                    BoxShadow(
-                      color: const Color(0xFF10B981).withOpacity(_logoGlow.value * 0.5),
-                      blurRadius: 60,
-                      spreadRadius: 2,
-                      offset: const Offset(0, 16),
-                    ),
-                  ],
+          child: SizedBox(
+            width: 120,
+            height: 120,
+            child: ClipRect(
+              child: Transform.scale(
+                scale: 2.2,
+                child: Image.asset(
+                  'assets/images/app_icon.png',
+                  width: 120,
+                  height: 120,
+                  fit: BoxFit.contain,
                 ),
-                child: const Icon(
-                  Icons.shield_rounded,
-                  color: Colors.white,
-                  size: 44,
-                ),
-              );
-            },
+              ),
+            ),
           ),
         ),
       ),
@@ -311,7 +295,7 @@ class _LoginScreenState extends State<LoginScreen>
         child: Text(
           'WaledNet',
           style: TextStyle(
-            fontSize: 34,
+            fontSize: 26,
             fontWeight: FontWeight.w800,
             letterSpacing: -1,
             color: isDark ? Colors.white : const Color(0xFF0F172A),
@@ -343,49 +327,30 @@ class _LoginScreenState extends State<LoginScreen>
     );
   }
 
-  Widget _buildSocialButtons(ThemeData theme, bool isDark, AuthProvider auth) {
+  Widget _buildGoogleButton(ThemeData theme, bool isDark, AuthProvider auth) {
     return FadeTransition(
       opacity: _fadeSocial,
       child: SlideTransition(
         position: _slideSocial,
-        child: Column(
-          children: [
-            _SocialButton(
-              icon: _buildGoogleIcon(),
-              label: 'المتابعة بحساب جوجل',
-              isDark: isDark,
-              isLoading: auth.isLoading,
-              onTap: () {
-                _haptic(HapticFeedbackType.light);
-                _handleGoogleSignIn(auth);
-              },
-            ),
-            const SizedBox(height: 12),
-            _SocialButton(
-              icon: const Icon(
-                Icons.apple,
-                size: 24,
-              ),
-              label: 'المتابعة بحساب Apple',
-              isDark: isDark,
-              isLoading: auth.isLoading,
-              onTap: () {
-                _haptic(HapticFeedbackType.light);
-              },
-            ),
-          ],
+        child: _SocialButton(
+          icon: _buildGoogleIcon(),
+          label: 'المتابعة بحساب جوجل',
+          isDark: isDark,
+          isLoading: auth.isLoading,
+          onTap: () {
+            _haptic(HapticFeedbackType.light);
+            _handleGoogleSignIn(auth);
+          },
         ),
       ),
     );
   }
 
   Widget _buildGoogleIcon() {
-    return SizedBox(
+    return SvgPicture.asset(
+      'assets/images/google.svg',
       width: 22,
       height: 22,
-      child: CustomPaint(
-        painter: _GoogleIconPainter(),
-      ),
     );
   }
 
@@ -1014,65 +979,6 @@ class _AmbientGradientPainter extends CustomPainter {
   bool shouldRepaint(covariant _AmbientGradientPainter oldDelegate) {
     return oldDelegate.progress != progress;
   }
-}
-
-class _GoogleIconPainter extends CustomPainter {
-  @override
-  void paint(Canvas canvas, Size size) {
-    final center = Offset(size.width / 2, size.height / 2);
-    final radius = size.width / 2;
-
-    final bluePaint = Paint()
-      ..color = const Color(0xFF4285F4)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = radius * 0.45;
-    canvas.drawArc(
-      Rect.fromCircle(center: center, radius: radius * 0.75),
-      -0.5,
-      1.8,
-      false,
-      bluePaint,
-    );
-
-    final greenPaint = Paint()
-      ..color = const Color(0xFF34A853)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = radius * 0.45;
-    canvas.drawArc(
-      Rect.fromCircle(center: center, radius: radius * 0.75),
-      1.3,
-      1.2,
-      false,
-      greenPaint,
-    );
-
-    final yellowPaint = Paint()
-      ..color = const Color(0xFFFBBC05)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = radius * 0.45;
-    canvas.drawArc(
-      Rect.fromCircle(center: center, radius: radius * 0.75),
-      2.5,
-      1.0,
-      false,
-      yellowPaint,
-    );
-
-    final redPaint = Paint()
-      ..color = const Color(0xFFEA4335)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = radius * 0.45;
-    canvas.drawArc(
-      Rect.fromCircle(center: center, radius: radius * 0.75),
-      3.5,
-      1.2,
-      false,
-      redPaint,
-    );
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
 
 enum HapticFeedbackType { light, medium, heavy, error }

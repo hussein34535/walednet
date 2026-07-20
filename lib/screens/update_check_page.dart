@@ -4,7 +4,9 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:package_info_plus/package_info_plus.dart';
+import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:WaledNet/providers/auth_provider.dart';
 
 class UpdateCheckPage extends StatefulWidget {
   const UpdateCheckPage({super.key});
@@ -71,7 +73,12 @@ class _UpdateCheckPageState extends State<UpdateCheckPage> {
 
   void _navigateToHome() {
     if (mounted) {
-      Navigator.of(context).pushReplacementNamed('/login');
+      final auth = Provider.of<AuthProvider>(context, listen: false);
+      if (auth.isLoggedIn) {
+        Navigator.of(context).pushReplacementNamed('/home');
+      } else {
+        Navigator.of(context).pushReplacementNamed('/login');
+      }
     }
   }
 

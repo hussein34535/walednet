@@ -13,7 +13,20 @@
           "package_name": "com.waled.net"
         }
       },
-      "oauth_client": [],
+      "oauth_client": [
+        {
+          "client_id": "289358660533-68258n2fdvehnmb14l5i17t826qokn2e.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.waled.net",
+            "certificate_hash": "368280854563fa490084cbfa7bc7145e9d7165b1"
+          }
+        },
+        {
+          "client_id": "289358660533-cva5l6i7uesg99b87e5etj0cadaoioj5.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
       "api_key": [
         {
           "current_key": "AIzaSyCr9OjGefTUtCM5a58j4kxNrl-8iPOiHSc"
@@ -21,7 +34,12 @@
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": []
+          "other_platform_oauth_client": [
+            {
+              "client_id": "289358660533-cva5l6i7uesg99b87e5etj0cadaoioj5.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
         }
       }
     },
@@ -32,7 +50,20 @@
           "package_name": "com.waledpro.app"
         }
       },
-      "oauth_client": [],
+      "oauth_client": [
+        {
+          "client_id": "289358660533-gml860d3qbafpuam5365p06nfp5mmrfj.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.waledpro.app",
+            "certificate_hash": "368280854563fa490084cbfa7bc7145e9d7165b1"
+          }
+        },
+        {
+          "client_id": "289358660533-cva5l6i7uesg99b87e5etj0cadaoioj5.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
       "api_key": [
         {
           "current_key": "AIzaSyCr9OjGefTUtCM5a58j4kxNrl-8iPOiHSc"
@@ -40,7 +71,12 @@
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": []
+          "other_platform_oauth_client": [
+            {
+              "client_id": "289358660533-cva5l6i7uesg99b87e5etj0cadaoioj5.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
         }
       }
     }

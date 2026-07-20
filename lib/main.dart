@@ -11,6 +11,7 @@ import 'package:WaledNet/screens/update_check_page.dart';
 import 'package:WaledNet/screens/login_screen.dart';
 import 'package:WaledNet/screens/home_page.dart';
 import 'package:WaledNet/services/subscription_service.dart';
+import 'package:WaledNet/firebase_options.dart';
 
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   await Firebase.initializeApp();
@@ -20,8 +21,17 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
+  try {
+    if (isDesktopPlatform) {
+      await Firebase.initializeApp(options: desktopFirebaseOptions);
+    } else {
+      await Firebase.initializeApp();
+    }
+  } catch (e) {
+    print('[Main] Firebase init failed: $e');
+  }
+
   if (Platform.isAndroid || Platform.isIOS) {
-    await Firebase.initializeApp();
     FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
 
     if (Platform.isAndroid) {

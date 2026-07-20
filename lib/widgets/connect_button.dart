@@ -154,9 +154,8 @@ class ConnectButton extends StatelessWidget {
             );
           },
         ),
-        const SizedBox(height: 20),
-        // Status Text / Timer
-        if (isFullyConnected && isConnectionVerified)
+        const SizedBox(height: 16),
+        if (isFullyConnected)
           GestureDetector(
             onTap: onTap,
             child: Container(
@@ -196,45 +195,21 @@ class ConnectButton extends StatelessWidget {
             ),
           )
         else
-          Text(
-            isAdLoading && !isConnected ? 'جاري تحميل الإعلان...' : buttonText,
-            style: theme.textTheme.titleMedium?.copyWith(
-              fontWeight: FontWeight.bold,
-              letterSpacing: 0.5,
-              fontSize: 22,
-              color: isConnected ? activeColor : inactiveColor,
-            ),
-          ),
-        if (isFullyConnected && isConnectionVerified)
           Padding(
             padding: const EdgeInsets.only(top: 8),
-            child: GestureDetector(
-              onTap: onTap,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-                decoration: BoxDecoration(
-                  color: Colors.red.withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(
-                    color: Colors.red.withValues(alpha: 0.25),
-                    width: 1,
-                  ),
-                ),
-                child: Text(
-                  'قطع الاتصال',
-                  style: TextStyle(
-                    color: Colors.red.shade400,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 14,
-                  ),
-                ),
+            child: Text(
+              isAdLoading && !isConnected ? 'جاري تحميل الإعلان...' : buttonText,
+              style: theme.textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.bold,
+                letterSpacing: 0.5,
+                fontSize: 22,
+                color: isConnected ? activeColor : inactiveColor,
               ),
             ),
           ),
-        // Extend button
         if (isFullyConnected && !isExtended && onExtend != null)
           Padding(
-            padding: const EdgeInsets.only(top: 12),
+            padding: const EdgeInsets.only(top: 6),
             child: GestureDetector(
               onTap: onExtend,
               child: Container(

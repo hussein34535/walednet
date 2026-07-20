@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:in_app_purchase/in_app_purchase.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:WaledNet/services/api_service.dart';
@@ -7,6 +8,11 @@ class SubscriptionService {
   static final SubscriptionService _instance = SubscriptionService._internal();
   factory SubscriptionService() => _instance;
   SubscriptionService._internal();
+
+  String _prefKey(String key) {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    return uid != null ? '${uid}_$key' : 'guest_$key';
+  }
 
   final InAppPurchase _inAppPurchase = InAppPurchase.instance;
   StreamSubscription<List<PurchaseDetails>>? _purchaseSubscription;
@@ -28,8 +34,8 @@ class SubscriptionService {
 
   Future<void> init() async {
     final prefs = await SharedPreferences.getInstance();
-    _isPremium = prefs.getBool('is_premium') ?? false;
-    _priceLabel = prefs.getString('price_label') ?? '';
+    _isPremium = prefs.getBool(_prefKey('is_premium')) ?? false;
+    _priceLabel = prefs.getString(_prefKey('price_label')) ?? '';
 
     await _fetchPricing();
 
@@ -58,7 +64,7 @@ class SubscriptionService {
       if (rawPrice.isNotEmpty) {
         _priceLabel = currency.isNotEmpty ? '$rawPrice $currency' : '$rawPrice ج.م';
         final prefs = await SharedPreferences.getInstance();
-        await prefs.setString('price_label', _priceLabel);
+        await prefs.setString(_prefKey('price_label'), _priceLabel);
       }
     }
   }
@@ -98,7 +104,7 @@ class SubscriptionService {
   Future<void> _setPremium(bool value) async {
     _isPremium = value;
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool('is_premium', value);
+    await prefs.setBool(_prefKey('is_premium'), value);
     _premiumController.add(value);
   }
 

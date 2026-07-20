@@ -1,36 +1,61 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'package:WaledNet/services/google_windows_auth.dart';
+
 class AuthProvider with ChangeNotifier {
-  final FirebaseAuth _auth = FirebaseAuth.instance;
-  final GoogleSignIn _googleSignIn = GoogleSignIn();
+  FirebaseAuth? _auth;
+  bool _googleInitialized = false;
+  bool _windowsGoogleSupported = false;
 
   User? _user;
   bool _isLoading = false;
   String? _errorMessage;
+  bool _initialized = false;
 
   User? get user => _user;
   bool get isLoggedIn => _user != null;
   bool get isLoading => _isLoading;
   String? get errorMessage => _errorMessage;
+  bool get isInitialized => _initialized;
+  bool get isGoogleSupported => !Platform.isWindows || _windowsGoogleSupported;
   String get displayName =>
       _user?.displayName ?? _user?.email?.split('@').first ?? 'مستخدم';
   String get email => _user?.email ?? '';
   String? get photoUrl => _user?.photoURL;
 
   AuthProvider() {
-    _auth.authStateChanges().listen((User? user) {
-      _user = user;
-      notifyListeners();
-    });
+    try {
+      _auth = FirebaseAuth.instance;
+      _initialized = true;
+      _auth!.authStateChanges().listen((User? user) {
+        _user = user;
+        notifyListeners();
+      });
+    } catch (e) {
+      print('[Auth] Firebase init error: $e');
+    }
+  }
+
+  Future<void> _ensureGoogleInitialized() async {
+    if (!_googleInitialized) {
+      await GoogleSignIn.instance.initialize(
+        clientId:
+            '289358660533-cva5l6i7uesg99b87e5etj0cadaoioj5.apps.googleusercontent.com',
+      );
+      _googleInitialized = true;
+    }
   }
 
   Future<bool> signInWithEmail(String email, String password) async {
+    if (_auth == null) return false;
     _setLoading(true);
     try {
-      final credential = await _auth.signInWithEmailAndPassword(
+      final credential = await _auth!.signInWithEmailAndPassword(
         email: email.trim(),
         password: password,
       );
@@ -51,9 +76,10 @@ class AuthProvider with ChangeNotifier {
 
   Future<bool> registerWithEmail(
       String email, String password, String name) async {
+    if (_auth == null) return false;
     _setLoading(true);
     try {
-      final credential = await _auth.createUserWithEmailAndPassword(
+      final credential = await _auth!.createUserWithEmailAndPassword(
         email: email.trim(),
         password: password,
       );
@@ -74,19 +100,25 @@ class AuthProvider with ChangeNotifier {
   }
 
   Future<bool> signInWithGoogle() async {
+    if (_auth == null) return false;
     _setLoading(true);
     try {
-      final googleUser = await _googleSignIn.signIn();
-      if (googleUser == null) {
-        _setLoading(false);
-        return false;
+      String? idToken;
+
+      if (Platform.isWindows) {
+        idToken = await GoogleWindowsAuth.signIn();
+        if (idToken == null) {
+          _setLoading(false);
+          return false;
+        }
+      } else {
+        await _ensureGoogleInitialized();
+        final googleUser = await GoogleSignIn.instance.authenticate();
+        idToken = googleUser.authentication.idToken;
       }
-      final googleAuth = await googleUser.authentication;
-      final credential = GoogleAuthProvider.credential(
-        accessToken: googleAuth.accessToken,
-        idToken: googleAuth.idToken,
-      );
-      final userCredential = await _auth.signInWithCredential(credential);
+
+      final credential = GoogleAuthProvider.credential(idToken: idToken);
+      final userCredential = await _auth!.signInWithCredential(credential);
       _user = userCredential.user;
       await _saveLogin(true);
       _setLoading(false);
@@ -99,8 +131,11 @@ class AuthProvider with ChangeNotifier {
   }
 
   Future<void> signOut() async {
-    await _auth.signOut();
-    await _googleSignIn.signOut();
+    if (_auth == null) return;
+    await _auth?.signOut();
+    if (!Platform.isWindows) {
+      await GoogleSignIn.instance.signOut();
+    }
     _user = null;
     await _saveLogin(false);
     notifyListeners();

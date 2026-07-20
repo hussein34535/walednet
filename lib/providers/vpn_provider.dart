@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:WaledNet/data/servers.dart';
@@ -22,6 +23,11 @@ class VpnProvider with ChangeNotifier {
   static const int _sshLocalPort = 10809;
   late final AdService _adService;
   final SpeedTestService _speedTestService = SpeedTestService();
+
+  String _prefKey(String key) {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    return uid != null ? '${uid}_$key' : 'guest_$key';
+  }
 
   VpnState _vpnState = VpnState.disconnected;
   String _buttonText = 'اتصال';
@@ -322,6 +328,19 @@ class VpnProvider with ChangeNotifier {
       }
     }).catchError((_) {});
     FirebaseMessaging.onMessage.listen((_) {});
+
+    FirebaseAuth.instance.authStateChanges().listen((User? user) {
+      if (_disposed) return;
+      _selectedServer = null;
+      _selectedProfile = null;
+      _isConnectionVerified = false;
+      _vpnServers = [];
+      _sniProfiles = [];
+      _isLoading = true;
+      _initialized = false;
+      notifyListeners();
+      initProvider();
+    });
   }
 
   Future<void> refreshData() async {
@@ -398,7 +417,7 @@ class VpnProvider with ChangeNotifier {
 
     if (serversOk || profilesOk) {
       await _saveDataToCache();
-      await prefs.setInt('last_fetch_time', currentTime);
+      await prefs.setInt(_prefKey('last_fetch_time'), currentTime);
       print("[_loadData] Data fetched from API and saved to cache.");
     }
 
@@ -426,14 +445,14 @@ class VpnProvider with ChangeNotifier {
     final serversJson = _vpnServers.map((s) => s.toJson()).toList();
     final profilesJson = _sniProfiles.map((p) => p.toJson()).toList();
 
-    await prefs.setString('cached_servers', jsonEncode(serversJson));
-    await prefs.setString('cached_profiles', jsonEncode(profilesJson));
+    await prefs.setString(_prefKey('cached_servers'), jsonEncode(serversJson));
+    await prefs.setString(_prefKey('cached_profiles'), jsonEncode(profilesJson));
     print("[_saveDataToCache] Cache saved successfully.");
   }
 
   Future<void> _loadServersFromCache() async {
     final prefs = await SharedPreferences.getInstance();
-    final serversStr = prefs.getString('cached_servers');
+    final serversStr = prefs.getString(_prefKey('cached_servers'));
     if (serversStr != null) {
       final List<dynamic> serversList = jsonDecode(serversStr);
       _vpnServers = serversList.map((s) => VpnServer.fromJson(s)).toList();
@@ -443,7 +462,7 @@ class VpnProvider with ChangeNotifier {
 
   Future<void> _loadProfilesFromCache() async {
     final prefs = await SharedPreferences.getInstance();
-    final profilesStr = prefs.getString('cached_profiles');
+    final profilesStr = prefs.getString(_prefKey('cached_profiles'));
     if (profilesStr != null) {
       final List<dynamic> profilesList = jsonDecode(profilesStr);
       final profiles = profilesList.map((p) => SniProfile.fromJson(p)).toList();
@@ -458,8 +477,8 @@ class VpnProvider with ChangeNotifier {
 
   Future<void> _loadSelections() async {
     final prefs = await SharedPreferences.getInstance();
-    final savedServerUrl = prefs.getString('selected_server_url');
-    final savedProfileSni = prefs.getString('selected_profile_sni');
+    final savedServerUrl = prefs.getString(_prefKey('selected_server_url'));
+    final savedProfileSni = prefs.getString(_prefKey('selected_profile_sni'));
     print("[_loadSelections] Attempting to load saved selections.");
     print("[_loadSelections] Saved Server URL: ${savedServerUrl != null ? '[redacted]' : 'null'}");
     print("[_loadSelections] Saved Profile SNI: $savedProfileSni");
@@ -496,10 +515,10 @@ class VpnProvider with ChangeNotifier {
   Future<void> _saveSelections() async {
     final prefs = await SharedPreferences.getInstance();
     if (_selectedServer != null) {
-      await prefs.setString('selected_server_url', _selectedServer!.url);
+      await prefs.setString(_prefKey('selected_server_url'), _selectedServer!.url);
     }
     if (_selectedProfile != null) {
-      await prefs.setString('selected_profile_sni', _selectedProfile!.sni);
+      await prefs.setString(_prefKey('selected_profile_sni'), _selectedProfile!.sni);
     }
   }
 
@@ -820,14 +839,10 @@ class VpnProvider with ChangeNotifier {
     } else {
       await _connectToVpn();
       if (_vpnStatus == 'CONNECTED') {
-        if (Platform.isWindows) {
-          if (!_isExtendedConnection) {
-            _connectionTime = 3600;
-          }
-          startTimer();
-        } else if (_connectionTime > 0) {
-          startTimer();
+        if (!_isExtendedConnection) {
+          _connectionTime = 3600;
         }
+        startTimer();
       }
     }
   }
@@ -967,23 +982,28 @@ class VpnProvider with ChangeNotifier {
   }
 
   void extendConnection() {
-    if (SubscriptionService().isPremium) {
-      _connectionTime = 86400;
-      _isExtendedConnection = true;
-      notifyListeners();
-      return;
-    }
+    try {
+      if (SubscriptionService().isPremium) {
+        _connectionTime = 86400;
+        _isExtendedConnection = true;
+        notifyListeners();
+        return;
+      }
+    } catch (_) {}
     loadFreshRewardedAd();
-    Future.delayed(const Duration(seconds: 3), () {
-      if (!_isRewardedAdReady) return;
-      _adService.showRewardedAdWithCallbacks(
-        onCompleted: () {
-          _connectionTime = 86400;
-          _isExtendedConnection = true;
-          notifyListeners();
-        },
-        onCancelled: () {},
-      );
+    Future.delayed(const Duration(seconds: 2), () {
+      if (_isRewardedAdReady) {
+        _adService.showRewardedAdWithCallbacks(
+          onCompleted: () {
+            _connectionTime = 86400;
+            _isExtendedConnection = true;
+            notifyListeners();
+          },
+          onCancelled: () {},
+        );
+      } else {
+        _addLog('الإعلان لم يتم تحميله بعد، حاول مرة أخرى');
+      }
     });
   }
 
