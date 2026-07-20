@@ -19,7 +19,7 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  
+
   if (Platform.isAndroid || Platform.isIOS) {
     await Firebase.initializeApp();
     FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
@@ -41,15 +41,15 @@ void main() async {
   try {
     await SubscriptionService().init();
   } catch (e) {
-    print('[Main] SubscriptionService init failed (expected without Google Play): $e');
+    print('[Main] SubscriptionService init failed: $e');
   }
 
   runApp(
     MultiProvider(
       providers: [
-        ChangeNotifierProvider(create: (context) => ThemeProvider()),
-        ChangeNotifierProvider(create: (context) => VpnProvider()),
-        ChangeNotifierProvider(create: (context) => AuthProvider()),
+        ChangeNotifierProvider(create: (_) => ThemeProvider()),
+        ChangeNotifierProvider(create: (_) => VpnProvider()),
+        ChangeNotifierProvider(create: (_) => AuthProvider()),
       ],
       child: const VpnApp(),
     ),
@@ -64,13 +64,13 @@ class VpnApp extends StatelessWidget {
     return MaterialApp(
       title: 'WaledNet VPN',
       theme: Provider.of<ThemeProvider>(context).themeData,
+      debugShowCheckedModeBanner: false,
       initialRoute: '/',
       routes: {
         '/': (context) => const UpdateCheckPage(),
         '/login': (context) => const LoginScreen(),
         '/home': (context) => const MyHomePage(),
       },
-      debugShowCheckedModeBanner: false,
     );
   }
 }

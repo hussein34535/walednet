@@ -15,7 +15,8 @@ class AuthProvider with ChangeNotifier {
   bool get isLoggedIn => _user != null;
   bool get isLoading => _isLoading;
   String? get errorMessage => _errorMessage;
-  String get displayName => _user?.displayName ?? _user?.email ?? 'مستخدم';
+  String get displayName =>
+      _user?.displayName ?? _user?.email?.split('@').first ?? 'مستخدم';
   String get email => _user?.email ?? '';
   String? get photoUrl => _user?.photoURL;
 
@@ -27,39 +28,30 @@ class AuthProvider with ChangeNotifier {
   }
 
   Future<bool> signInWithEmail(String email, String password) async {
-    _isLoading = true;
-    _errorMessage = null;
-    notifyListeners();
-
+    _setLoading(true);
     try {
       final credential = await _auth.signInWithEmailAndPassword(
         email: email.trim(),
         password: password,
       );
       _user = credential.user;
-      await _saveLoginState(true);
-      _isLoading = false;
-      notifyListeners();
+      await _saveLogin(true);
+      _setLoading(false);
       return true;
     } on FirebaseAuthException catch (e) {
-      _errorMessage = _getErrorMessage(e.code);
-      _isLoading = false;
-      notifyListeners();
+      _errorMessage = _mapError(e.code);
+      _setLoading(false);
       return false;
-    } catch (e) {
+    } catch (_) {
       _errorMessage = 'حدث خطأ غير متوقع';
-      _isLoading = false;
-      notifyListeners();
+      _setLoading(false);
       return false;
     }
   }
 
   Future<bool> registerWithEmail(
       String email, String password, String name) async {
-    _isLoading = true;
-    _errorMessage = null;
-    notifyListeners();
-
+    _setLoading(true);
     try {
       final credential = await _auth.createUserWithEmailAndPassword(
         email: email.trim(),
@@ -67,54 +59,41 @@ class AuthProvider with ChangeNotifier {
       );
       await credential.user?.updateDisplayName(name.trim());
       _user = credential.user;
-      await _saveLoginState(true);
-      _isLoading = false;
-      notifyListeners();
+      await _saveLogin(true);
+      _setLoading(false);
       return true;
     } on FirebaseAuthException catch (e) {
-      _errorMessage = _getErrorMessage(e.code);
-      _isLoading = false;
-      notifyListeners();
+      _errorMessage = _mapError(e.code);
+      _setLoading(false);
       return false;
-    } catch (e) {
+    } catch (_) {
       _errorMessage = 'حدث خطأ غير متوقع';
-      _isLoading = false;
-      notifyListeners();
+      _setLoading(false);
       return false;
     }
   }
 
   Future<bool> signInWithGoogle() async {
-    _isLoading = true;
-    _errorMessage = null;
-    notifyListeners();
-
+    _setLoading(true);
     try {
-      final GoogleSignInAccount? googleUser = await _googleSignIn.signIn();
+      final googleUser = await _googleSignIn.signIn();
       if (googleUser == null) {
-        _isLoading = false;
-        notifyListeners();
+        _setLoading(false);
         return false;
       }
-
-      final GoogleSignInAuthentication googleAuth =
-          await googleUser.authentication;
-
+      final googleAuth = await googleUser.authentication;
       final credential = GoogleAuthProvider.credential(
         accessToken: googleAuth.accessToken,
         idToken: googleAuth.idToken,
       );
-
       final userCredential = await _auth.signInWithCredential(credential);
       _user = userCredential.user;
-      await _saveLoginState(true);
-      _isLoading = false;
-      notifyListeners();
+      await _saveLogin(true);
+      _setLoading(false);
       return true;
-    } catch (e) {
+    } catch (_) {
       _errorMessage = 'فشل تسجيل الدخول بجوجل';
-      _isLoading = false;
-      notifyListeners();
+      _setLoading(false);
       return false;
     }
   }
@@ -123,16 +102,22 @@ class AuthProvider with ChangeNotifier {
     await _auth.signOut();
     await _googleSignIn.signOut();
     _user = null;
-    await _saveLoginState(false);
+    await _saveLogin(false);
     notifyListeners();
   }
 
-  Future<void> _saveLoginState(bool loggedIn) async {
+  void _setLoading(bool value) {
+    _isLoading = value;
+    if (value) _errorMessage = null;
+    notifyListeners();
+  }
+
+  Future<void> _saveLogin(bool loggedIn) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('is_logged_in', loggedIn);
   }
 
-  String _getErrorMessage(String code) {
+  String _mapError(String code) {
     switch (code) {
       case 'user-not-found':
         return 'لا يوجد حساب بهذا البريد الإلكتروني';
