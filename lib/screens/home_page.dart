@@ -130,9 +130,9 @@ class _MyHomePageState extends State<MyHomePage>
               builder: (context, constraints) {
                 final height = constraints.maxHeight;
 
-                final double topSpace = isConnected ? 4 : 24;
-                final double middleSpace = isConnected ? 16 : 36;
-                final double bottomSpace = isConnected ? 12 : 24;
+                final double topSpace = isFullyConnected ? 4 : 24;
+                final double middleSpace = isFullyConnected ? 16 : 36;
+                final double bottomSpace = isFullyConnected ? 12 : 24;
 
                 Widget content = Column(
                   mainAxisSize: MainAxisSize.min,
@@ -164,7 +164,7 @@ class _MyHomePageState extends State<MyHomePage>
                   ],
                 );
 
-                final bool allowScroll = !Platform.isWindows && (isConnected || height < 640);
+                final bool allowScroll = !Platform.isWindows && (isFullyConnected || height < 640);
 
                 return SingleChildScrollView(
                   physics: allowScroll
@@ -175,7 +175,7 @@ class _MyHomePageState extends State<MyHomePage>
                       minHeight: height,
                     ),
                     child: Container(
-                      alignment: isConnected ? Alignment.topCenter : Alignment.center,
+                      alignment: isFullyConnected ? Alignment.topCenter : Alignment.center,
                       child: content,
                     ),
                   ),
@@ -324,9 +324,9 @@ class _MyHomePageState extends State<MyHomePage>
 
     return Column(
       children: [
-        if (isFullyConnected) ...[
-          _buildSelectionMenus(vpnProvider),
-          SizedBox(height: isConnected ? 12 : 20),
+        _buildSelectionMenus(vpnProvider),
+        SizedBox(height: isConnected ? 12 : 20),
+        if (isFullyConnected)
           ConnectionStatusCard(
             vpnStatus: vpnProvider.vpnStatus,
             isTestingSpeed: vpnProvider.isTestingSpeed,
@@ -334,7 +334,6 @@ class _MyHomePageState extends State<MyHomePage>
             uploadSpeed: vpnProvider.uploadSpeedTestResultMbps,
             onSpeedTestPressed: vpnProvider.runSpeedTest,
           ),
-        ],
       ],
     );
   }
