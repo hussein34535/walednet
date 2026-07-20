@@ -13,7 +13,8 @@ class SniProfile {
     if (sni.isEmpty) return name;
     final clean = name.replaceAll(RegExp(r'[?�\ufffd]'), ' ').trim();
     if (clean.length > 2) return clean;
-    return 'SNI #${sni.hashCode.abs().toString().padLeft(4, '0').substring(0, 4)}';
+    if (sni.length > 2) return sni;
+    return name;
   }
 
   factory SniProfile.fromJson(Map<String, dynamic> json) {

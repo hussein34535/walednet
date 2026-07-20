@@ -6,7 +6,7 @@ import 'package:WaledNet/theme_provider.dart';
 import 'package:WaledNet/services/api_service.dart';
 import 'package:WaledNet/providers/vpn_provider.dart';
 
-class ProfileBottomSheet extends StatelessWidget {
+class ProfileBottomSheet extends StatefulWidget {
   final List<SniProfile> profiles;
   final SniProfile? selectedProfile;
   final ValueChanged<SniProfile> onProfileSelected;
@@ -17,6 +17,41 @@ class ProfileBottomSheet extends StatelessWidget {
     required this.selectedProfile,
     required this.onProfileSelected,
   });
+
+  @override
+  State<ProfileBottomSheet> createState() => _ProfileBottomSheetState();
+}
+
+class _ProfileBottomSheetState extends State<ProfileBottomSheet> {
+  final ScrollController _scrollController = ScrollController();
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _scrollToSelected();
+    });
+  }
+
+  void _scrollToSelected() {
+    final selected = widget.selectedProfile;
+    if (selected == null) return;
+    final index = widget.profiles.indexOf(selected);
+    if (index < 0) return;
+    final offset = index * 80.0;
+    if (offset > _scrollController.position.maxScrollExtent) return;
+    _scrollController.animateTo(
+      offset,
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeInOut,
+    );
+  }
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
 
   void _showAddSniDialog(BuildContext context) {
     final theme = Theme.of(context);
@@ -304,12 +339,13 @@ class ProfileBottomSheet extends StatelessWidget {
           const SizedBox(height: 8),
           Flexible(
             child: ListView.builder(
+              controller: _scrollController,
               shrinkWrap: true,
               physics: const BouncingScrollPhysics(),
-              itemCount: profiles.length,
+              itemCount: widget.profiles.length,
               itemBuilder: (context, index) {
-                final profile = profiles[index];
-                final isSelected = selectedProfile == profile;
+                final profile = widget.profiles[index];
+                final isSelected = widget.selectedProfile?.sni == profile.sni;
 
                 return Container(
                   margin: const EdgeInsets.symmetric(
@@ -335,7 +371,7 @@ class ProfileBottomSheet extends StatelessWidget {
                           horizontal: 16, vertical: 4),
                       onTap: () {
                         Navigator.pop(context);
-                        onProfileSelected(profile);
+                        widget.onProfileSelected(profile);
                       },
                       leading: Container(
                         padding: const EdgeInsets.all(8),
@@ -350,7 +386,7 @@ class ProfileBottomSheet extends StatelessWidget {
                         ),
                       ),
                       title: Text(
-                        profile.name,
+                        profile.displayName,
                         style: TextStyle(
                           fontWeight: isSelected
                               ? FontWeight.bold

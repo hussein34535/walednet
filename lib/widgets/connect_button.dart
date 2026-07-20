@@ -157,39 +157,42 @@ class ConnectButton extends StatelessWidget {
         const SizedBox(height: 20),
         // Status Text / Timer
         if (isFullyConnected && isConnectionVerified)
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-            decoration: BoxDecoration(
-              color: activeColor.withValues(alpha: 0.08),
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(
-                color: activeColor.withValues(alpha: 0.15),
-                width: 1,
+          GestureDetector(
+            onTap: onTap,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+              decoration: BoxDecoration(
+                color: activeColor.withValues(alpha: 0.08),
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(
+                  color: activeColor.withValues(alpha: 0.15),
+                  width: 1,
+                ),
               ),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Icon(Icons.timer_outlined, size: 16, color: Colors.grey),
-                const SizedBox(width: 6),
-                Text(
-                  'متبقي ',
-                  style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                    color: activeColor,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.timer_outlined, size: 16, color: Colors.grey),
+                  const SizedBox(width: 6),
+                  Text(
+                    'متبقي ',
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      color: activeColor,
+                    ),
                   ),
-                ),
-                Text(
-                  '${(connectionTime ~/ 3600).toString().padLeft(2, '0')}:${((connectionTime % 3600) ~/ 60).toString().padLeft(2, '0')}:${(connectionTime % 60).toString().padLeft(2, '0')}',
-                  style: const TextStyle(
-                    fontFamily: 'monospace',
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                    letterSpacing: 1.0,
+                  Text(
+                    '${(connectionTime ~/ 3600).toString().padLeft(2, '0')}:${((connectionTime % 3600) ~/ 60).toString().padLeft(2, '0')}:${(connectionTime % 60).toString().padLeft(2, '0')}',
+                    style: const TextStyle(
+                      fontFamily: 'monospace',
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 1.0,
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           )
         else
@@ -200,6 +203,32 @@ class ConnectButton extends StatelessWidget {
               letterSpacing: 0.5,
               fontSize: 22,
               color: isConnected ? activeColor : inactiveColor,
+            ),
+          ),
+        if (isFullyConnected && isConnectionVerified)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: GestureDetector(
+              onTap: onTap,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+                decoration: BoxDecoration(
+                  color: Colors.red.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(
+                    color: Colors.red.withValues(alpha: 0.25),
+                    width: 1,
+                  ),
+                ),
+                child: Text(
+                  'قطع الاتصال',
+                  style: TextStyle(
+                    color: Colors.red.shade400,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 14,
+                  ),
+                ),
+              ),
             ),
           ),
         // Extend button
