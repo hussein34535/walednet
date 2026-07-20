@@ -34,6 +34,10 @@ class _HomeScreenState extends State<HomeScreen>
       curve: Curves.easeOut,
     );
     _fadeController.forward();
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      context.read<VpnProvider>().initProvider();
+    });
   }
 
   @override

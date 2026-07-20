@@ -128,92 +128,7 @@ class VpnProvider with ChangeNotifier {
     notifyListeners();
   }
 
-  VpnProvider() {
-    WidgetsBinding.instance.addPostFrameCallback((_) => _initProviderDelayed());
-  }
-
-  Future<void> _initProviderDelayed() async {
-    if (_disposed) return;
-
-    await _loadData();
-
-    if (_disposed) return;
-
-    Future.delayed(const Duration(seconds: 2), () {
-      if (_disposed) return;
-
-      if (Platform.isAndroid || Platform.isIOS) {
-        _vpnService.initialize();
-        _vpnService.statusStream.listen(_onStatusChanged);
-        _vpnService.logStream.listen((logLine) {
-          _addLog('[Core] $logLine');
-        });
-      }
-
-      _sshTunnel.onConnectionChanged = _onSshConnectionChanged;
-      _sshTunnel.onStatusUpdate = (msg) {
-        _addLog('[SSH] $msg');
-        if (msg.startsWith('reconnecting:')) {
-          _sshReconnectAttempt = int.tryParse(msg.split(':').last) ?? 0;
-          _isSshReconnecting = true;
-          notifyListeners();
-        } else if (msg == 'reconnect_failed') {
-          _isSshReconnecting = false;
-          _vpnStatus = 'DISCONNECTED';
-          _buttonText = 'اتصال';
-          stopTimer();
-          notifyListeners();
-        }
-      };
-
-      _adService = AdService(
-        onRewardedReadyChanged: (ready) {
-          _isRewardedAdReady = ready;
-          notifyListeners();
-        },
-        onInterstitialReadyChanged: (ready) {
-          _isInterstitialAdReady = ready;
-          notifyListeners();
-        },
-        onAdFailed: _handleAdFailed,
-        onRewardedCompleted: () {
-          _isExtendedConnection = true;
-          _connectionTime = 24 * 60 * 60;
-          _isAdLoading = false;
-          notifyListeners();
-          _connectToVpn();
-        },
-      );
-
-      if (!SubscriptionService().isPremium) {
-        _adService.initialize();
-      }
-    });
-
-    Future.delayed(const Duration(seconds: 4), () {
-      if (_disposed) return;
-      try {
-        final info = PackageInfo.fromPlatform();
-        info.then((i) => _deviceId = i.packageName).catchError((_) {});
-      } catch (_) {}
-      FirebaseMessaging.instance.getToken().then((token) {
-        print("Firebase Messaging Token: $token");
-        if (token != null) {
-          ApiService.registerDeviceToken(token);
-        }
-      }).catchError((e) {
-        print("Error getting Firebase Messaging Token: $e");
-      });
-      FirebaseMessaging.onMessage.listen((RemoteMessage message) {
-        print('Got a message whilst in the foreground!');
-        print('Message data: ${message.data}');
-      });
-    });
-
-    Future.delayed(const Duration(seconds: 6), () {
-      if (!_disposed) pingAllServers();
-    });
-  }
+  VpnProvider();
 
   Future<void> _onSshConnectionChanged(bool connected) async {
     if (_disposed) return;
@@ -328,7 +243,85 @@ class VpnProvider with ChangeNotifier {
   }
 
   Future<void> initProvider() async {
-    // handled by _initProviderDelayed via addPostFrameCallback
+    if (_initialized || _disposed) return;
+
+    await _loadData();
+    if (_disposed) return;
+
+    if (Platform.isAndroid || Platform.isIOS) {
+      _vpnService.initialize();
+    }
+
+    _scheduleDelayedTasks();
+  }
+
+  void _scheduleDelayedTasks() {
+    Future.delayed(const Duration(seconds: 2), () {
+      if (_disposed) return;
+
+      _sshTunnel.onConnectionChanged = _onSshConnectionChanged;
+      _sshTunnel.onStatusUpdate = (msg) {
+        _addLog('[SSH] $msg');
+        if (msg.startsWith('reconnecting:')) {
+          _sshReconnectAttempt = int.tryParse(msg.split(':').last) ?? 0;
+          _isSshReconnecting = true;
+          notifyListeners();
+        } else if (msg == 'reconnect_failed') {
+          _isSshReconnecting = false;
+          _vpnStatus = 'DISCONNECTED';
+          _buttonText = 'اتصال';
+          stopTimer();
+          notifyListeners();
+        }
+      };
+
+      _adService = AdService(
+        onRewardedReadyChanged: (ready) {
+          _isRewardedAdReady = ready;
+          notifyListeners();
+        },
+        onInterstitialReadyChanged: (ready) {
+          _isInterstitialAdReady = ready;
+          notifyListeners();
+        },
+        onAdFailed: _handleAdFailed,
+        onRewardedCompleted: () {
+          _isExtendedConnection = true;
+          _connectionTime = 24 * 60 * 60;
+          _isAdLoading = false;
+          notifyListeners();
+          _connectToVpn();
+        },
+      );
+
+      if (!SubscriptionService().isPremium) {
+        _adService.initialize();
+      }
+    });
+
+    Future.delayed(const Duration(seconds: 4), () {
+      if (_disposed) return;
+      _initFirebase();
+    });
+
+    Future.delayed(const Duration(seconds: 6), () {
+      if (!_disposed) pingAllServers();
+    });
+  }
+
+  void _initFirebase() {
+    if (_disposed) return;
+    try {
+      PackageInfo.fromPlatform()
+          .then((i) => _deviceId = i.packageName)
+          .catchError((_) {});
+    } catch (_) {}
+    FirebaseMessaging.instance.getToken().then((token) {
+      if (token != null && !_disposed) {
+        ApiService.registerDeviceToken(token);
+      }
+    }).catchError((_) {});
+    FirebaseMessaging.onMessage.listen((_) {});
   }
 
   Future<void> refreshData() async {
