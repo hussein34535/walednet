@@ -11,6 +11,8 @@
             android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE"
             android:minSdkVersion="34"/>
     <uses-permission android:name="android.permission.WAKE_LOCK"/>
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT"/>
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
 
     <application
             android:label="WaledNet"
@@ -35,6 +37,10 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
+
+        <meta-data
+                android:name="io.flutter.embedding.android.EnableImpeller"
+                android:value="true"/>
 
         <service
                 android:name=".BoxService"

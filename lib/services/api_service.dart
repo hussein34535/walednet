@@ -184,20 +184,19 @@ class ApiService {
     try {
       final headers = await _getHeaders();
       headers['Content-Type'] = 'application/json';
-      
       final body = jsonEncode({'token': token});
-      
+
       final response = await http.post(
         Uri.parse('$_baseUrl/device'),
         headers: headers,
         body: body,
-      );
-      
+      ).timeout(const Duration(seconds: 5));
+
       if (response.statusCode == 200 || response.statusCode == 201) {
         print('[ApiService] Device token registered successfully');
         return true;
       } else {
-        print('[ApiService] Device token registration failed: ${response.statusCode}');
+        print('[ApiService] Device token registration skipped: ${response.statusCode}');
         return false;
       }
     } catch (e) {

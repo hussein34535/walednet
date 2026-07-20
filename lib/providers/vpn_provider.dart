@@ -284,27 +284,31 @@ class VpnProvider with ChangeNotifier {
 
   Future<void> initProvider() async {
     await _loadData();
-    // Start pinging all servers in the background immediately after loading data
-    pingAllServers();
-    
+
     if (Platform.isAndroid || Platform.isIOS) {
       _vpnService.initialize();
-      if (!SubscriptionService().isPremium) {
-        _adService.initialize();
-      }
 
-      try {
-        final info = await PackageInfo.fromPlatform();
-        _deviceId = info.packageName;
-      } catch (_) {}
-
-      FirebaseMessaging.instance.getToken().then((token) {
-        print("Firebase Messaging Token: $token");
-        if (token != null) {
-          ApiService.registerDeviceToken(token);
+      Future.delayed(const Duration(seconds: 2), () {
+        if (!SubscriptionService().isPremium && !_disposed) {
+          _adService.initialize();
         }
-      }).catchError((e) {
-        print("Error getting Firebase Messaging Token: $e");
+      });
+
+      Future.delayed(const Duration(seconds: 3), () {
+        if (_disposed) return;
+        try {
+          final info = PackageInfo.fromPlatform();
+          info.then((i) => _deviceId = i.packageName).catchError((_) {});
+        } catch (_) {}
+
+        FirebaseMessaging.instance.getToken().then((token) {
+          print("Firebase Messaging Token: $token");
+          if (token != null) {
+            ApiService.registerDeviceToken(token);
+          }
+        }).catchError((e) {
+          print("Error getting Firebase Messaging Token: $e");
+        });
       });
 
       FirebaseMessaging.onMessage.listen((RemoteMessage message) {
@@ -312,6 +316,10 @@ class VpnProvider with ChangeNotifier {
         print('Message data: ${message.data}');
       });
     }
+
+    Future.delayed(const Duration(seconds: 1), () {
+      if (!_disposed) pingAllServers();
+    });
   }
 
   Future<void> refreshData() async {
@@ -326,18 +334,30 @@ class VpnProvider with ChangeNotifier {
   Future<void> _loadData() async {
     final prefs = await SharedPreferences.getInstance();
     final currentTime = DateTime.now().millisecondsSinceEpoch;
-
     print("[_loadData] Starting data load process.");
 
     bool serversOk = false;
     bool profilesOk = false;
+
     try {
       print("[_loadData] Attempting to fetch new data from server...");
-      final servers = await ApiService.fetchVlessServers();
-      final vmessServers = await ApiService.fetchVmessServers();
-      final sshServers = await ApiService.fetchSshServers();
-      final slowDnsServers = await ApiService.fetchSlowDnsServers();
-      if (servers.isNotEmpty || vmessServers.isNotEmpty || sshServers.isNotEmpty || slowDnsServers.isNotEmpty) {
+
+      final results = await Future.wait([
+        ApiService.fetchVlessServers(),
+        ApiService.fetchVmessServers(),
+        ApiService.fetchSshServers(),
+        ApiService.fetchSlowDnsServers(),
+        ApiService.fetchSniProfiles(),
+      ]);
+
+      final servers = results[0] as List<VpnServer>;
+      final vmessServers = results[1] as List<VpnServer>;
+      final sshServers = results[2] as List<VpnServer>;
+      final slowDnsServers = results[3] as List<VpnServer>;
+      final profiles = results[4] as List<SniProfile>;
+
+      if (servers.isNotEmpty || vmessServers.isNotEmpty ||
+          sshServers.isNotEmpty || slowDnsServers.isNotEmpty) {
         _vpnServers = [
           ...servers,
           ...vmessServers,
@@ -346,17 +366,7 @@ class VpnProvider with ChangeNotifier {
         ];
         serversOk = true;
       }
-    } catch (e) {
-      print("[_loadData] Servers API fetch failed: $e");
-    }
 
-    if (!serversOk) {
-      print("[_loadData] Servers API failed; falling back to cache for servers.");
-      await _loadServersFromCache();
-    }
-
-    try {
-      final profiles = await ApiService.fetchSniProfiles();
       if (profiles.isNotEmpty) {
         _sniProfiles = [
           SniProfile(name: 'Direct / None (بدون SNI)', sni: ''),
@@ -372,11 +382,15 @@ class VpnProvider with ChangeNotifier {
         profilesOk = true;
       }
     } catch (e) {
-      print("[_loadData] Profiles API fetch failed: $e");
+      print("[_loadData] API fetch failed: $e");
     }
 
+    if (!serversOk) {
+      print("[_loadData] Servers API failed; falling back to cache.");
+      await _loadServersFromCache();
+    }
     if (!profilesOk) {
-      print("[_loadData] Profiles API failed; falling back to cache for profiles.");
+      print("[_loadData] Profiles API failed; falling back to cache.");
       await _loadProfilesFromCache();
     }
 
@@ -386,15 +400,9 @@ class VpnProvider with ChangeNotifier {
       print("[_loadData] Data fetched from API and saved to cache.");
     }
 
-
-
     if (_vpnServers.isEmpty) {
       _vpnServers = [
-        VpnServer(
-          name: 'No Servers Available',
-          url: '',
-          icon: 'assets/images/server.svg',
-        )
+        VpnServer(name: 'No Servers Available', url: '', icon: 'assets/images/server.svg'),
       ];
     }
     if (_sniProfiles.length <= 1) {
@@ -404,10 +412,8 @@ class VpnProvider with ChangeNotifier {
       ];
     }
 
-    print("[_loadData] After ensuring non-empty lists: Servers count = ${_vpnServers.length}, SNI profiles count = ${_sniProfiles.length}");
-
+    print("[_loadData] Servers count = ${_vpnServers.length}, SNI profiles count = ${_sniProfiles.length}");
     await _loadSelections();
-
     _isLoading = false;
     _initialized = true;
     notifyListeners();
@@ -870,60 +876,65 @@ class VpnProvider with ChangeNotifier {
     _isPingingServers = true;
     notifyListeners();
 
-    for (final server in _vpnServers) {
-      if (server.url.isEmpty ||
-          server.name == 'No Servers Available' ||
-          server.name == 'Loading...') continue;
+    final batchSize = 5;
+    for (var i = 0; i < _vpnServers.length; i += batchSize) {
+      if (_disposed) return;
 
-      try {
-        final stopwatch = Stopwatch()..start();
-        String host = '';
-        int port = 443;
-        
-        final url = server.url;
-        if (url.startsWith('vmess://')) {
-          final base64Str = url.substring('vmess://'.length);
-          String normalized = base64Str;
-          final mod = base64Str.length % 4;
-          if (mod > 0) normalized += '=' * (4 - mod);
-          final decoded = jsonDecode(utf8.decode(base64.decode(normalized)));
-          host = decoded['add']?.toString() ?? '';
-          port = int.tryParse(decoded['port']?.toString() ?? '443') ?? 443;
-        } else if (url.startsWith('slowdns://')) {
-          final uri = Uri.tryParse(url);
-          if (uri != null) {
-            host = uri.queryParameters['dns_ip'] ?? '';
-            port = 53;
-          }
-        } else {
-          final uri = Uri.tryParse(url);
-          if (uri != null) {
-            host = uri.host;
-            port = uri.port != 0 ? uri.port : 443;
-          }
-        }
+      final batch = _vpnServers.skip(i).take(batchSize);
+      await Future.wait(batch.map((server) async {
+        if (server.url.isEmpty ||
+            server.name == 'No Servers Available' ||
+            server.name == 'Loading...') return;
 
-        if (host.isNotEmpty) {
-          final socket = await Socket.connect(
-            host,
-            port,
-            timeout: const Duration(seconds: 4),
-          );
-          stopwatch.stop();
-          socket.destroy();
-          _serverDelays[server.url] = stopwatch.elapsedMilliseconds;
-        } else {
+        try {
+          final stopwatch = Stopwatch()..start();
+          String host = '';
+          int port = 443;
+
+          final url = server.url;
+          if (url.startsWith('vmess://')) {
+            final base64Str = url.substring('vmess://'.length);
+            String normalized = base64Str;
+            final mod = base64Str.length % 4;
+            if (mod > 0) normalized += '=' * (4 - mod);
+            final decoded = jsonDecode(utf8.decode(base64.decode(normalized)));
+            host = decoded['add']?.toString() ?? '';
+            port = int.tryParse(decoded['port']?.toString() ?? '443') ?? 443;
+          } else if (url.startsWith('slowdns://')) {
+            final uri = Uri.tryParse(url);
+            if (uri != null) {
+              host = uri.queryParameters['dns_ip'] ?? '';
+              port = 53;
+            }
+          } else {
+            final uri = Uri.tryParse(url);
+            if (uri != null) {
+              host = uri.host;
+              port = uri.port != 0 ? uri.port : 443;
+            }
+          }
+
+          if (host.isNotEmpty) {
+            final socket = await Socket.connect(
+              host, port,
+              timeout: const Duration(seconds: 3),
+            );
+            stopwatch.stop();
+            socket.destroy();
+            _serverDelays[server.url] = stopwatch.elapsedMilliseconds;
+          } else {
+            _serverDelays[server.url] = -1;
+          }
+        } catch (e) {
           _serverDelays[server.url] = -1;
         }
-      } catch (e) {
-        _serverDelays[server.url] = -1;
-      }
-      notifyListeners();
-      await Future.delayed(const Duration(milliseconds: 300));
+      }));
+
+      if (!_disposed) notifyListeners();
     }
 
     _isPingingServers = false;
-    notifyListeners();
+    if (!_disposed) notifyListeners();
   }
 
   void handleSelectionChange<T>(T? value) {
