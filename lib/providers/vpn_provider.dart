@@ -69,6 +69,12 @@ class VpnProvider with ChangeNotifier {
   List<SniProfile> get sniProfiles => _sniProfiles;
   VpnServer? get selectedServer => _selectedServer;
   SniProfile? get selectedProfile => _selectedProfile;
+  bool get isConnected => _vpnStatus == 'CONNECTED';
+  bool get isConnecting => _vpnStatus == 'CONNECTING';
+  String? get connectedIp => null;
+  void toggleConnection() => toggleVpn();
+  int? getServerDelay(String url) => _serverDelays[url];
+  void selectServer(VpnServer server) => handleSelectionChange(server);
   int get connectionTime => _connectionTime;
   bool get isExtendedConnection => _isExtendedConnection;
   bool get isAdLoading => _isAdLoading;
@@ -123,51 +129,90 @@ class VpnProvider with ChangeNotifier {
   }
 
   VpnProvider() {
-    if (Platform.isAndroid || Platform.isIOS) {
-      _vpnService.initialize();
-      _vpnService.statusStream.listen(_onStatusChanged);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _initProviderDelayed());
+  }
 
-      // Listen to sing-box core logs
-      _vpnService.logStream.listen((logLine) {
-        _addLog('[Core] $logLine');
-      });
-    }
+  Future<void> _initProviderDelayed() async {
+    if (_disposed) return;
 
-    // ── SSH Tunnel Callbacks ──
-    _sshTunnel.onConnectionChanged = _onSshConnectionChanged;
-    _sshTunnel.onStatusUpdate = (msg) {
-      _addLog('[SSH] $msg');
-      if (msg.startsWith('reconnecting:')) {
-        _sshReconnectAttempt = int.tryParse(msg.split(':').last) ?? 0;
-        _isSshReconnecting = true;
-        notifyListeners();
-      } else if (msg == 'reconnect_failed') {
-        _isSshReconnecting = false;
-        _vpnStatus = 'DISCONNECTED';
-        _buttonText = 'اتصال';
-        stopTimer();
-        notifyListeners();
+    await _loadData();
+
+    if (_disposed) return;
+
+    Future.delayed(const Duration(seconds: 2), () {
+      if (_disposed) return;
+
+      if (Platform.isAndroid || Platform.isIOS) {
+        _vpnService.initialize();
+        _vpnService.statusStream.listen(_onStatusChanged);
+        _vpnService.logStream.listen((logLine) {
+          _addLog('[Core] $logLine');
+        });
       }
-    };
 
-    _adService = AdService(
-      onRewardedReadyChanged: (ready) {
-        _isRewardedAdReady = ready;
-        notifyListeners();
-      },
-      onInterstitialReadyChanged: (ready) {
-        _isInterstitialAdReady = ready;
-        notifyListeners();
-      },
-      onAdFailed: _handleAdFailed,
-      onRewardedCompleted: () {
-        _isExtendedConnection = true;
-        _connectionTime = 24 * 60 * 60;
-        _isAdLoading = false;
-        notifyListeners();
-        _connectToVpn();
-      },
-    );
+      _sshTunnel.onConnectionChanged = _onSshConnectionChanged;
+      _sshTunnel.onStatusUpdate = (msg) {
+        _addLog('[SSH] $msg');
+        if (msg.startsWith('reconnecting:')) {
+          _sshReconnectAttempt = int.tryParse(msg.split(':').last) ?? 0;
+          _isSshReconnecting = true;
+          notifyListeners();
+        } else if (msg == 'reconnect_failed') {
+          _isSshReconnecting = false;
+          _vpnStatus = 'DISCONNECTED';
+          _buttonText = 'اتصال';
+          stopTimer();
+          notifyListeners();
+        }
+      };
+
+      _adService = AdService(
+        onRewardedReadyChanged: (ready) {
+          _isRewardedAdReady = ready;
+          notifyListeners();
+        },
+        onInterstitialReadyChanged: (ready) {
+          _isInterstitialAdReady = ready;
+          notifyListeners();
+        },
+        onAdFailed: _handleAdFailed,
+        onRewardedCompleted: () {
+          _isExtendedConnection = true;
+          _connectionTime = 24 * 60 * 60;
+          _isAdLoading = false;
+          notifyListeners();
+          _connectToVpn();
+        },
+      );
+
+      if (!SubscriptionService().isPremium) {
+        _adService.initialize();
+      }
+    });
+
+    Future.delayed(const Duration(seconds: 4), () {
+      if (_disposed) return;
+      try {
+        final info = PackageInfo.fromPlatform();
+        info.then((i) => _deviceId = i.packageName).catchError((_) {});
+      } catch (_) {}
+      FirebaseMessaging.instance.getToken().then((token) {
+        print("Firebase Messaging Token: $token");
+        if (token != null) {
+          ApiService.registerDeviceToken(token);
+        }
+      }).catchError((e) {
+        print("Error getting Firebase Messaging Token: $e");
+      });
+      FirebaseMessaging.onMessage.listen((RemoteMessage message) {
+        print('Got a message whilst in the foreground!');
+        print('Message data: ${message.data}');
+      });
+    });
+
+    Future.delayed(const Duration(seconds: 6), () {
+      if (!_disposed) pingAllServers();
+    });
   }
 
   Future<void> _onSshConnectionChanged(bool connected) async {
@@ -283,43 +328,7 @@ class VpnProvider with ChangeNotifier {
   }
 
   Future<void> initProvider() async {
-    await _loadData();
-
-    if (Platform.isAndroid || Platform.isIOS) {
-      _vpnService.initialize();
-
-      Future.delayed(const Duration(seconds: 2), () {
-        if (!SubscriptionService().isPremium && !_disposed) {
-          _adService.initialize();
-        }
-      });
-
-      Future.delayed(const Duration(seconds: 3), () {
-        if (_disposed) return;
-        try {
-          final info = PackageInfo.fromPlatform();
-          info.then((i) => _deviceId = i.packageName).catchError((_) {});
-        } catch (_) {}
-
-        FirebaseMessaging.instance.getToken().then((token) {
-          print("Firebase Messaging Token: $token");
-          if (token != null) {
-            ApiService.registerDeviceToken(token);
-          }
-        }).catchError((e) {
-          print("Error getting Firebase Messaging Token: $e");
-        });
-      });
-
-      FirebaseMessaging.onMessage.listen((RemoteMessage message) {
-        print('Got a message whilst in the foreground!');
-        print('Message data: ${message.data}');
-      });
-    }
-
-    Future.delayed(const Duration(seconds: 1), () {
-      if (!_disposed) pingAllServers();
-    });
+    // handled by _initProviderDelayed via addPostFrameCallback
   }
 
   Future<void> refreshData() async {
