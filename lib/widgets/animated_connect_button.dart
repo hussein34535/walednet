@@ -69,7 +69,7 @@ class _AnimatedConnectButtonState extends State<AnimatedConnectButton>
     final size = MediaQuery.of(context).size.width * 0.55;
 
     return GestureDetector(
-      onTap: widget.isConnecting ? null : widget.onTap,
+      onTap: widget.onTap,
       child: AnimatedBuilder(
         animation: _pulseAnimation,
         builder: (context, child) {

@@ -75,7 +75,7 @@ class ConnectButton extends StatelessWidget {
                 ),
                 // The main physical/glassy interactive orb button
                 GestureDetector(
-                  onTap: isFullyConnected ? onTap : (isButtonLoading ? null : onTap),
+                  onTap: onTap,
                   child: AnimatedContainer(
                     duration: const Duration(milliseconds: 500),
                     width: 140,

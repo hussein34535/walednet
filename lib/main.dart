@@ -6,7 +6,10 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:WaledNet/theme_provider.dart';
 import 'package:WaledNet/providers/vpn_provider.dart';
+import 'package:WaledNet/providers/auth_provider.dart';
 import 'package:WaledNet/screens/update_check_page.dart';
+import 'package:WaledNet/screens/login_screen.dart';
+import 'package:WaledNet/screens/home_page.dart';
 import 'package:WaledNet/services/subscription_service.dart';
 
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
@@ -46,6 +49,7 @@ void main() async {
       providers: [
         ChangeNotifierProvider(create: (context) => ThemeProvider()),
         ChangeNotifierProvider(create: (context) => VpnProvider()),
+        ChangeNotifierProvider(create: (context) => AuthProvider()),
       ],
       child: const VpnApp(),
     ),
@@ -60,7 +64,12 @@ class VpnApp extends StatelessWidget {
     return MaterialApp(
       title: 'WaledNet VPN',
       theme: Provider.of<ThemeProvider>(context).themeData,
-      home: const UpdateCheckPage(),
+      initialRoute: '/',
+      routes: {
+        '/': (context) => const UpdateCheckPage(),
+        '/login': (context) => const LoginScreen(),
+        '/home': (context) => const MyHomePage(),
+      },
       debugShowCheckedModeBanner: false,
     );
   }

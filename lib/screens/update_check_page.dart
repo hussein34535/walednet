@@ -5,7 +5,6 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'home_page.dart';
 
 class UpdateCheckPage extends StatefulWidget {
   const UpdateCheckPage({super.key});
@@ -72,9 +71,7 @@ class _UpdateCheckPageState extends State<UpdateCheckPage> {
 
   void _navigateToHome() {
     if (mounted) {
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (context) => const MyHomePage()),
-      );
+      Navigator.of(context).pushReplacementNamed('/home');
     }
   }
 

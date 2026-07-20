@@ -34,8 +34,6 @@ class _MyHomePageState extends State<MyHomePage>
 
   final Uri _telegramUrl = Uri.parse('https://t.me/D_S_D_C1');
   final Uri _subscriptionUrl = Uri.parse('https://t.me/D_S_D_Cbot');
-  final Uri _developerUrl = Uri.parse('https://t.me/he_s_en');
-
   @override
   void initState() {
     super.initState();
@@ -124,23 +122,6 @@ class _MyHomePageState extends State<MyHomePage>
       body: Container(
         decoration: BoxDecoration(
           color: theme.scaffoldBackgroundColor,
-          gradient: themeProvider.isDarkMode
-              ? const RadialGradient(
-                  center: Alignment(0, -0.35),
-                  radius: 1.3,
-                  colors: [
-                    Color(0xFF0F172A), // Deep Slate Midnight Accent
-                    Color(0xFF07090E), // Obsidian Black Base
-                  ],
-                )
-              : const LinearGradient(
-                  colors: [
-                    Color(0xFFF8FAFC),
-                    Color(0xFFEDF2F7),
-                  ],
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                ),
         ),
         child: SafeArea(
           child: Padding(
@@ -219,8 +200,6 @@ class _MyHomePageState extends State<MyHomePage>
             _launchUrl(_telegramUrl);
           } else if (value == 'subscribe') {
             _launchUrl(_subscriptionUrl);
-          } else if (value == 'developer') {
-            _launchUrl(_developerUrl);
           } else if (value == 'theme') {
             themeProvider.toggleTheme();
           }
@@ -267,24 +246,6 @@ class _MyHomePageState extends State<MyHomePage>
                 const SizedBox(width: 12),
                 Text(
                   'اشتراك (بدون إعلانات)',
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          PopupMenuItem<String>(
-            value: 'developer',
-            child: Row(
-              children: [
-                const Icon(
-                  Icons.code_rounded,
-                  color: Color(0xFF5856D6), // iOS Purple
-                ),
-                const SizedBox(width: 12),
-                Text(
-                  r'المطور :7𝖊$𝖊𝒏',
                   style: theme.textTheme.bodyMedium?.copyWith(
                     fontWeight: FontWeight.w600,
                   ),
@@ -359,18 +320,21 @@ class _MyHomePageState extends State<MyHomePage>
   Widget _buildConnectionDetails(VpnProvider vpnProvider) {
     final isConnected = vpnProvider.vpnStatus == 'CONNECTED' ||
         vpnProvider.vpnStatus == 'CONNECTING';
+    final isFullyConnected = vpnProvider.vpnStatus == 'CONNECTED';
 
     return Column(
       children: [
-        _buildSelectionMenus(vpnProvider),
-        SizedBox(height: isConnected ? 12 : 20),
-        ConnectionStatusCard(
-          vpnStatus: vpnProvider.vpnStatus,
-          isTestingSpeed: vpnProvider.isTestingSpeed,
-          downloadSpeed: vpnProvider.speedTestResultMbps,
-          uploadSpeed: vpnProvider.uploadSpeedTestResultMbps,
-          onSpeedTestPressed: vpnProvider.runSpeedTest,
-        ),
+        if (isFullyConnected) ...[
+          _buildSelectionMenus(vpnProvider),
+          SizedBox(height: isConnected ? 12 : 20),
+          ConnectionStatusCard(
+            vpnStatus: vpnProvider.vpnStatus,
+            isTestingSpeed: vpnProvider.isTestingSpeed,
+            downloadSpeed: vpnProvider.speedTestResultMbps,
+            uploadSpeed: vpnProvider.uploadSpeedTestResultMbps,
+            onSpeedTestPressed: vpnProvider.runSpeedTest,
+          ),
+        ],
       ],
     );
   }
@@ -391,7 +355,7 @@ class _MyHomePageState extends State<MyHomePage>
         const SizedBox(height: 12),
         _buildSelectionTile(
           label: 'حزمة الشبكة (SNI)',
-          title: vpnProvider.selectedProfile?.name ?? 'Loading...',
+          title: vpnProvider.selectedProfile?.displayName ?? 'Loading...',
           icon: Icons.shield_outlined,
           iconColor: const Color(0xFF5856D6), // iOS Purple
           iconBgColor: const Color(0xFF5856D6).withOpacity(0.12),
@@ -631,53 +595,52 @@ class _MyHomePageState extends State<MyHomePage>
   void _showRewardVideoDialog() {
     if (SubscriptionService().isPremium) return;
     final vpn = _vpnProvider;
-    if (vpn != null && vpn.isRewardedAdReady) {
-      // تأخير بسيط عشان الـ TUN يستقر قبل ما يبدا الإعلان
-      Future.delayed(const Duration(milliseconds: 1500), () {
-        if (!mounted) return;
-        print('[HomePage] Unity Ads is ready, showing video...');
-        vpn.showRewardedAd(
-        onCompleted: () {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text(
-                'تمت مشاهدة إعلان يونيتي بالكامل! استمتع بالاتصال.',
-                textAlign: TextAlign.right,
-                style: TextStyle(fontFamily: 'Cairo'),
-              ),
-              backgroundColor: Colors.green,
-            ),
-          );
-        },
-        onCancelled: () {
-          vpn.toggleVpn();
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text(
-                'تم قطع الاتصال لعدم اكتمال الإعلان.',
-                textAlign: TextAlign.right,
-                style: TextStyle(fontFamily: 'Cairo'),
-              ),
-              backgroundColor: Colors.redAccent,
-            ),
-          );
-        },
-      );
-      });
-    } else {
-      print('[HomePage] Unity Ads is not ready, bypassing dialog and connecting directly.');
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'تم الاتصال بنجاح!',
-            textAlign: TextAlign.right,
-            style: TextStyle(fontFamily: 'Cairo'),
+    if (vpn == null) return;
+    // Reload ad fresh before showing to avoid timeout
+    print('[HomePage] Reloading Unity Ads fresh...');
+    vpn.loadFreshRewardedAd();
+    Future.delayed(const Duration(seconds: 3), () {
+      if (!mounted) return;
+      if (!vpn.isRewardedAdReady) {
+        print('[HomePage] Unity Ads still not ready after reload, skipping.');
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('تم الاتصال بنجاح!'),
+            backgroundColor: Colors.green,
+            duration: Duration(seconds: 2),
           ),
-          backgroundColor: Colors.green,
-          duration: Duration(seconds: 2),
-        ),
-      );
-    }
+        );
+        return;
+      }
+      print('[HomePage] Showing fresh Unity Ads...');
+      vpn.showRewardedAd(
+      onCompleted: () {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'تمت مشاهدة الإعلان بالكامل! استمتع بالاتصال.',
+              textAlign: TextAlign.right,
+              style: TextStyle(fontFamily: 'Cairo'),
+            ),
+            backgroundColor: Colors.green,
+          ),
+        );
+      },
+      onCancelled: () {
+        vpn.toggleVpn();
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'تم قطع الاتصال لعدم اكتمال الإعلان.',
+              textAlign: TextAlign.right,
+              style: TextStyle(fontFamily: 'Cairo'),
+            ),
+            backgroundColor: Colors.redAccent,
+          ),
+        );
+      },
+    );
+    });
   }
 }
 

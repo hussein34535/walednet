@@ -967,6 +967,10 @@ class VpnProvider with ChangeNotifier {
     super.dispose();
   }
 
+  void loadFreshRewardedAd() {
+    _adService.loadRewardedAd();
+  }
+
   void showRewardedAd({
     required void Function() onCompleted,
     required void Function() onCancelled,

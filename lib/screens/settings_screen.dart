@@ -1,12 +1,34 @@
 import 'package:flutter/material.dart';
-import '../theme/app_colors.dart';
-import '../widgets/glass_card.dart';
+import 'package:provider/provider.dart';
+import 'package:url_launcher/url_launcher.dart';
+import 'package:WaledNet/providers/auth_provider.dart';
+import 'package:WaledNet/providers/vpn_provider.dart';
+import 'package:WaledNet/theme/app_colors.dart';
+import 'package:WaledNet/widgets/glass_card.dart';
+
+const _telegramUrl = 'https://t.me/D_S_D_Cbot';
 
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
 
+  Future<void> _openTelegram(BuildContext context) async {
+    final uri = Uri.parse(_telegramUrl);
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    } else {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('لم يتم العثور على تيليجرام')),
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    final auth = Provider.of<AuthProvider>(context);
+    final vpn = Provider.of<VpnProvider>(context);
+
     return CustomScrollView(
       physics: const BouncingScrollPhysics(),
       slivers: [
@@ -24,70 +46,18 @@ class SettingsScreen extends StatelessWidget {
             ),
           ),
         ),
+        // Profile card
         SliverToBoxAdapter(
           child: GlassCard(
             margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-            child: Row(
-              children: [
-                Container(
-                  width: 56,
-                  height: 56,
-                  decoration: BoxDecoration(
-                    gradient: AppColors.primaryGradient,
-                    borderRadius: BorderRadius.circular(16),
-                  ),
-                  child: const Icon(
-                    Icons.person_rounded,
-                    color: Colors.white,
-                    size: 28,
-                  ),
-                ),
-                const SizedBox(width: 16),
-                const Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'مستخدم WaledNet',
-                        style: TextStyle(
-                          fontSize: 17,
-                          fontWeight: FontWeight.w600,
-                          color: AppColors.textPrimaryDark,
-                        ),
-                      ),
-                      SizedBox(height: 4),
-                      Text(
-                        'الخطة المجانية',
-                        style: TextStyle(
-                          fontSize: 13,
-                          color: AppColors.textSecondaryDark,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 14,
-                    vertical: 7,
-                  ),
-                  decoration: BoxDecoration(
-                    gradient: AppColors.primaryGradient,
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: const Text(
-                    'ترقية',
-                    style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                      color: Colors.white,
-                    ),
-                  ),
-                ),
-              ],
-            ),
+            child: auth.isLoggedIn ? _buildLoggedInProfile(auth) : _buildGuestProfile(context, auth),
           ),
         ),
+        // Subscription card
+        SliverToBoxAdapter(
+          child: _buildSubscriptionCard(context),
+        ),
+        // Connection settings
         SliverToBoxAdapter(
           child: _buildSettingsGroup(
             title: 'الاتصال',
@@ -100,8 +70,8 @@ class SettingsScreen extends StatelessWidget {
               ),
               _SettingItem(
                 icon: Icons.speed_rounded,
-                title: 'بروتوكول الاتصال',
-                subtitle: 'VLESS / VMess / SSH',
+                title: 'السيرفر الحالي',
+                subtitle: vpn.selectedServer?.name ?? 'غير محدد',
                 trailing: const Icon(
                   Icons.chevron_right_rounded,
                   color: AppColors.textSecondaryDark,
@@ -110,7 +80,7 @@ class SettingsScreen extends StatelessWidget {
               _SettingItem(
                 icon: Icons.fingerprint_rounded,
                 title: 'SNI Profile',
-                subtitle: 'إعدادات التشفير',
+                subtitle: vpn.selectedProfile?.displayName ?? 'غير محدد',
                 trailing: const Icon(
                   Icons.chevron_right_rounded,
                   color: AppColors.textSecondaryDark,
@@ -119,6 +89,7 @@ class SettingsScreen extends StatelessWidget {
             ],
           ),
         ),
+        // General settings
         SliverToBoxAdapter(
           child: _buildSettingsGroup(
             title: 'عام',
@@ -147,6 +118,7 @@ class SettingsScreen extends StatelessWidget {
             ],
           ),
         ),
+        // About
         SliverToBoxAdapter(
           child: _buildSettingsGroup(
             title: 'حول',
@@ -188,6 +160,205 @@ class SettingsScreen extends StatelessWidget {
     );
   }
 
+  Widget _buildLoggedInProfile(AuthProvider auth) {
+    return Row(
+      children: [
+        Container(
+          width: 56,
+          height: 56,
+          decoration: BoxDecoration(
+            gradient: AppColors.primaryGradient,
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: auth.photoUrl != null
+              ? ClipRRect(
+                  borderRadius: BorderRadius.circular(16),
+                  child: Image.network(auth.photoUrl!, fit: BoxFit.cover),
+                )
+              : const Icon(Icons.person_rounded, color: Colors.white, size: 28),
+        ),
+        const SizedBox(width: 16),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                auth.displayName,
+                style: const TextStyle(
+                  fontSize: 17,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.textPrimaryDark,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                auth.email,
+                style: const TextStyle(
+                  fontSize: 13,
+                  color: AppColors.textSecondaryDark,
+                ),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ],
+          ),
+        ),
+        GestureDetector(
+          onTap: () => auth.signOut(),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+            decoration: BoxDecoration(
+              color: Colors.red.withValues(alpha: 0.15),
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: const Text(
+              'تسجيل خروج',
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: Colors.redAccent,
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildGuestProfile(BuildContext context, AuthProvider auth) {
+    return Row(
+      children: [
+        Container(
+          width: 56,
+          height: 56,
+          decoration: BoxDecoration(
+            gradient: AppColors.primaryGradient,
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: const Icon(Icons.person_outline_rounded, color: Colors.white, size: 28),
+        ),
+        const SizedBox(width: 16),
+        const Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'زائر',
+                style: TextStyle(
+                  fontSize: 17,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.textPrimaryDark,
+                ),
+              ),
+              SizedBox(height: 4),
+              Text(
+                'سجّل الدخول لمزامنة اشتراكك',
+                style: TextStyle(
+                  fontSize: 13,
+                  color: AppColors.textSecondaryDark,
+                ),
+              ),
+            ],
+          ),
+        ),
+        GestureDetector(
+          onTap: () => Navigator.of(context).pushNamed('/login'),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+            decoration: BoxDecoration(
+              gradient: AppColors.primaryGradient,
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: const Text(
+              'تسجيل دخول',
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: Colors.white,
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildSubscriptionCard(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: [Color(0xFF0088CC), Color(0xFF005580)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF0088CC).withValues(alpha: 0.3),
+            blurRadius: 20,
+            offset: const Offset(0, 8),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 50,
+            height: 50,
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.2),
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: const Icon(Icons.telegram, color: Colors.white, size: 28),
+          ),
+          const SizedBox(width: 16),
+          const Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'باقة سنوية - 50 ج.م',
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white,
+                  ),
+                ),
+                SizedBox(height: 4),
+                Text(
+                  'إزالة الإعلانات عبر تيليجرام',
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: Colors.white70,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          GestureDetector(
+            onTap: () => _openTelegram(context),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: const Text(
+                'تواصل',
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: Color(0xFF0088CC),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildSettingsGroup({
     required String title,
     required List<_SettingItem> items,
@@ -214,7 +385,7 @@ class SettingsScreen extends StatelessWidget {
               color: AppColors.darkCard,
               borderRadius: BorderRadius.circular(20),
               border: Border.all(
-                color: AppColors.darkBorder.withOpacity(0.5),
+                color: AppColors.darkBorder.withValues(alpha: 0.5),
               ),
             ),
             child: Column(
@@ -230,7 +401,7 @@ class SettingsScreen extends StatelessWidget {
                         ? null
                         : Border(
                             bottom: BorderSide(
-                              color: AppColors.darkBorder.withOpacity(0.3),
+                              color: AppColors.darkBorder.withValues(alpha: 0.3),
                             ),
                           ),
                   ),
@@ -240,7 +411,7 @@ class SettingsScreen extends StatelessWidget {
                         width: 38,
                         height: 38,
                         decoration: BoxDecoration(
-                          color: AppColors.primary.withOpacity(0.1),
+                          color: AppColors.primary.withValues(alpha: 0.1),
                           borderRadius: BorderRadius.circular(10),
                         ),
                         child: Icon(
