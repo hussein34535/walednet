@@ -6,7 +6,6 @@ import 'package:WaledNet/theme_provider.dart';
 
 void main() {
   testWidgets('VPN app smoke test', (WidgetTester tester) async {
-    // Build our app and trigger a frame.
     await tester.pumpWidget(
       ChangeNotifierProvider(
         create: (context) => ThemeProvider(),

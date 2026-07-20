@@ -59,6 +59,7 @@ class _MyHomePageState extends State<MyHomePage>
         _vpnProvider = Provider.of<VpnProvider>(context, listen: false);
         _vpnProvider!.addListener(_vpnListener);
         _lastStatus = _vpnProvider!.vpnStatus;
+        _vpnProvider!.initProvider();
       }
     });
   }
