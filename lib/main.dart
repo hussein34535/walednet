@@ -7,6 +7,7 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:WaledNet/theme_provider.dart';
 import 'package:WaledNet/providers/vpn_provider.dart';
 import 'package:WaledNet/screens/update_check_page.dart';
+import 'package:WaledNet/services/subscription_service.dart';
 
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   await Firebase.initializeApp();
@@ -19,6 +20,25 @@ void main() async {
   if (Platform.isAndroid || Platform.isIOS) {
     await Firebase.initializeApp();
     FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
+
+    if (Platform.isAndroid) {
+      await FirebaseMessaging.instance
+          .setForegroundNotificationPresentationOptions(
+        alert: true,
+        badge: true,
+        sound: true,
+      );
+    }
+
+    FirebaseMessaging.onMessageOpenedApp.listen((message) {
+      print('onMessageOpenedApp: ${message.data}');
+    });
+  }
+
+  try {
+    await SubscriptionService().init();
+  } catch (e) {
+    print('[Main] SubscriptionService init failed (expected without Google Play): $e');
   }
 
   runApp(

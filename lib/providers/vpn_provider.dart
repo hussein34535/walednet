@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:WaledNet/data/servers.dart';
 import 'package:WaledNet/services/api_service.dart';
 import 'package:WaledNet/services/vpn_service.dart';
@@ -13,6 +14,7 @@ import 'package:WaledNet/services/speed_test_service.dart';
 import 'package:WaledNet/services/singbox_config_builder.dart';
 import 'package:WaledNet/services/ssh_tunnel_service.dart';
 import 'package:WaledNet/services/windows_vpn_manager.dart';
+import 'package:WaledNet/services/subscription_service.dart';
 
 class VpnProvider with ChangeNotifier {
   final VpnService _vpnService = VpnService();
@@ -55,6 +57,8 @@ class VpnProvider with ChangeNotifier {
   int _downlink = 0;
   bool _isSshReconnecting = false;
   int _sshReconnectAttempt = 0;
+  String? _deviceId;
+  String? _lastAddedSni;
 
   VpnState get vpnState => _vpnState;
   int get uplink => _uplink;
@@ -82,6 +86,7 @@ class VpnProvider with ChangeNotifier {
   int get socksProxyPort => 10808;
   bool get isSshReconnecting => _isSshReconnecting;
   int get sshReconnectAttempt => _sshReconnectAttempt;
+  String? get deviceId => _deviceId;
 
   Timer? _logNotifyTimer;
   bool _logNotifyPending = false;
@@ -284,10 +289,20 @@ class VpnProvider with ChangeNotifier {
     
     if (Platform.isAndroid || Platform.isIOS) {
       _vpnService.initialize();
-      _adService.initialize();
+      if (!SubscriptionService().isPremium) {
+        _adService.initialize();
+      }
+
+      try {
+        final info = await PackageInfo.fromPlatform();
+        _deviceId = info.packageName;
+      } catch (_) {}
 
       FirebaseMessaging.instance.getToken().then((token) {
         print("Firebase Messaging Token: $token");
+        if (token != null) {
+          ApiService.registerDeviceToken(token);
+        }
       }).catchError((e) {
         print("Error getting Firebase Messaging Token: $e");
       });
@@ -302,6 +317,10 @@ class VpnProvider with ChangeNotifier {
   Future<void> refreshData() async {
     await _loadData();
     notifyListeners();
+  }
+
+  void markLastAddedSni(String sni) {
+    _lastAddedSni = sni;
   }
 
   Future<void> _loadData() async {
@@ -343,6 +362,13 @@ class VpnProvider with ChangeNotifier {
           SniProfile(name: 'Direct / None (بدون SNI)', sni: ''),
           ...profiles,
         ];
+        if (_lastAddedSni != null) {
+          final idx = _sniProfiles.indexWhere((p) => p.sni == _lastAddedSni);
+          if (idx > 1) {
+            final profile = _sniProfiles.removeAt(idx);
+            _sniProfiles.insert(1, profile);
+          }
+        }
         profilesOk = true;
       }
     } catch (e) {
@@ -932,6 +958,10 @@ class VpnProvider with ChangeNotifier {
     required void Function() onCompleted,
     required void Function() onCancelled,
   }) {
+    if (SubscriptionService().isPremium) {
+      onCompleted();
+      return;
+    }
     if (Platform.isAndroid || Platform.isIOS) {
       _adService.showRewardedAdWithCallbacks(
         onCompleted: onCompleted,

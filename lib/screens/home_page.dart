@@ -2,15 +2,18 @@ import 'dart:io';
 import 'dart:ui';
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:WaledNet/theme_provider.dart';
 import 'package:WaledNet/providers/vpn_provider.dart';
 import 'package:WaledNet/data/servers.dart';
+import 'package:WaledNet/services/subscription_service.dart';
 import '../widgets/server_bottom_sheet.dart';
 import '../widgets/profile_bottom_sheet.dart';
 import '../widgets/connect_button.dart';
 import '../widgets/connection_status_card.dart';
+import '../widgets/subscription_dialog.dart';
 import '../services/windows_vpn_manager.dart';
 import 'logs_page.dart';
 
@@ -122,14 +125,21 @@ class _MyHomePageState extends State<MyHomePage>
           color: theme.scaffoldBackgroundColor,
           gradient: themeProvider.isDarkMode
               ? const RadialGradient(
-                  center: Alignment(0, -0.3),
-                  radius: 1.2,
+                  center: Alignment(0, -0.35),
+                  radius: 1.3,
                   colors: [
-                    Color(0xFF0C1030), // Extremely subtle dark blue tint at the center
-                    Color(0xFF000000), // True black background
+                    Color(0xFF0F172A), // Deep Slate Midnight Accent
+                    Color(0xFF07090E), // Obsidian Black Base
                   ],
                 )
-              : null,
+              : const LinearGradient(
+                  colors: [
+                    Color(0xFFF8FAFC),
+                    Color(0xFFEDF2F7),
+                  ],
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                ),
         ),
         child: SafeArea(
           child: Padding(
@@ -210,6 +220,8 @@ class _MyHomePageState extends State<MyHomePage>
             _launchUrl(_subscriptionUrl);
           } else if (value == 'developer') {
             _launchUrl(_developerUrl);
+          } else if (value == 'theme') {
+            themeProvider.toggleTheme();
           }
         },
         icon: Icon(Icons.menu_rounded, color: theme.iconTheme.color, size: 28),
@@ -279,6 +291,27 @@ class _MyHomePageState extends State<MyHomePage>
               ],
             ),
           ),
+          PopupMenuDivider(),
+          PopupMenuItem<String>(
+            value: 'theme',
+            child: Row(
+              children: [
+                Icon(
+                  themeProvider.isDarkMode
+                      ? Icons.light_mode_rounded
+                      : Icons.dark_mode_rounded,
+                  color: const Color(0xFFFF9500),
+                ),
+                const SizedBox(width: 12),
+                Text(
+                  themeProvider.isDarkMode ? 'الوضع النهاري' : 'الوضع الليلي',
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ),
         ],
       ),
       title: Text(
@@ -291,9 +324,20 @@ class _MyHomePageState extends State<MyHomePage>
       ),
       actions: [
         IconButton(
-          icon: const Icon(Icons.telegram, color: Color(0xFF007AFF)),
-          iconSize: 28,
-          onPressed: () => _launchUrl(_telegramUrl),
+          tooltip: 'اشتراك (منع الإعلانات)',
+          icon: SvgPicture.asset(
+            'assets/images/ad_block.svg',
+            width: 26,
+            height: 26,
+            colorFilter: const ColorFilter.mode(
+              Color(0xFFFF9500),
+              BlendMode.srcIn,
+            ),
+          ),
+          onPressed: () => showDialog(
+            context: context,
+            builder: (_) => const SubscriptionDialog(),
+          ),
         ),
         IconButton(
           icon: const Icon(Icons.receipt_long_rounded),
@@ -305,16 +349,6 @@ class _MyHomePageState extends State<MyHomePage>
               MaterialPageRoute(builder: (context) => const LogsPage()),
             );
           },
-        ),
-        IconButton(
-          icon: Icon(
-            themeProvider.isDarkMode
-                ? Icons.light_mode_rounded
-                : Icons.dark_mode_rounded,
-          ),
-          iconSize: 26,
-          color: theme.iconTheme.color,
-          onPressed: () => themeProvider.toggleTheme(),
         ),
         const SizedBox(width: 8),
       ],
@@ -386,25 +420,25 @@ class _MyHomePageState extends State<MyHomePage>
       child: ClipRRect(
         borderRadius: BorderRadius.circular(22),
         child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+          filter: ImageFilter.blur(sigmaX: 25, sigmaY: 25),
           child: Container(
             height: 74,
             padding: const EdgeInsets.symmetric(horizontal: 16),
             decoration: BoxDecoration(
               color: themeProvider.isDarkMode
-                  ? Colors.white.withOpacity(0.04) // Frosted dark glass
-                  : Colors.white.withOpacity(0.85), // Frosted light glass
+                  ? Colors.white.withOpacity(0.06)
+                  : Colors.white.withOpacity(0.7),
               borderRadius: BorderRadius.circular(22),
               border: Border.all(
                 color: themeProvider.isDarkMode
-                    ? Colors.white.withOpacity(0.06)
-                    : Colors.black.withOpacity(0.04),
+                    ? Colors.white.withOpacity(0.09)
+                    : Colors.black.withOpacity(0.05),
                 width: 1.0,
               ),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withOpacity(themeProvider.isDarkMode ? 0.15 : 0.02),
-                  blurRadius: 15,
+                  color: Colors.black.withOpacity(themeProvider.isDarkMode ? 0.25 : 0.03),
+                  blurRadius: 20,
                   offset: const Offset(0, 8),
                 ),
               ],
@@ -594,10 +628,14 @@ class _MyHomePageState extends State<MyHomePage>
   }
 
   void _showRewardVideoDialog() {
+    if (SubscriptionService().isPremium) return;
     final vpn = _vpnProvider;
     if (vpn != null && vpn.isRewardedAdReady) {
-      print('[HomePage] Unity Ads is ready, showing video...');
-      vpn.showRewardedAd(
+      // تأخير بسيط عشان الـ TUN يستقر قبل ما يبدا الإعلان
+      Future.delayed(const Duration(milliseconds: 1500), () {
+        if (!mounted) return;
+        print('[HomePage] Unity Ads is ready, showing video...');
+        vpn.showRewardedAd(
         onCompleted: () {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
@@ -624,6 +662,7 @@ class _MyHomePageState extends State<MyHomePage>
           );
         },
       );
+      });
     } else {
       print('[HomePage] Unity Ads is not ready, bypassing dialog and connecting directly.');
       ScaffoldMessenger.of(context).showSnackBar(

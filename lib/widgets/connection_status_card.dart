@@ -27,24 +27,24 @@ class ConnectionStatusCard extends StatelessWidget {
     return ClipRRect(
       borderRadius: BorderRadius.circular(24),
       child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+        filter: ImageFilter.blur(sigmaX: 25, sigmaY: 25),
         child: Container(
-          padding: const EdgeInsets.all(20),
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
           decoration: BoxDecoration(
             color: themeProvider.isDarkMode
-                ? Colors.white.withOpacity(0.04) // Frosted dark glass
-                : Colors.white.withOpacity(0.85), // Frosted light glass
+                ? Colors.white.withOpacity(0.06)
+                : Colors.white.withOpacity(0.7),
             borderRadius: BorderRadius.circular(24),
             border: Border.all(
               color: themeProvider.isDarkMode
-                  ? Colors.white.withOpacity(0.06)
-                  : Colors.black.withOpacity(0.04),
+                  ? Colors.white.withOpacity(0.09)
+                  : Colors.black.withOpacity(0.05),
               width: 1.0,
             ),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withOpacity(themeProvider.isDarkMode ? 0.15 : 0.02),
-                blurRadius: 15,
+                color: Colors.black.withOpacity(themeProvider.isDarkMode ? 0.25 : 0.03),
+                blurRadius: 20,
                 offset: const Offset(0, 8),
               ),
             ],
@@ -59,16 +59,16 @@ class ConnectionStatusCard extends StatelessWidget {
                         Container(
                           padding: const EdgeInsets.all(10),
                           decoration: BoxDecoration(
-                            color: const Color(0xFF007AFF).withOpacity(0.08), // iOS Blue
+                            color: theme.colorScheme.primary.withOpacity(0.12),
                             shape: BoxShape.circle,
                             border: Border.all(
-                              color: const Color(0xFF007AFF).withOpacity(0.15),
+                              color: theme.colorScheme.primary.withOpacity(0.2),
                               width: 1.0,
                             ),
                           ),
-                          child: const Icon(
+                          child: Icon(
                             Icons.arrow_downward_rounded,
-                            color: Color(0xFF007AFF),
+                            color: theme.colorScheme.primary,
                             size: 20,
                           ),
                         ),
@@ -80,13 +80,13 @@ class ConnectionStatusCard extends StatelessWidget {
                               'تحميل (Download)',
                               style: theme.textTheme.bodySmall?.copyWith(
                                 color: theme.textTheme.bodySmall?.color
-                                    ?.withOpacity(0.4),
+                                    ?.withOpacity(0.5),
                                 fontSize: 11,
                                 fontWeight: FontWeight.w600,
                                 letterSpacing: 0.1,
                               ),
                             ),
-                            const SizedBox(height: 2),
+                            const SizedBox(height: 3),
                             _buildSpeedInfoWidget('Download'),
                           ],
                         ),
@@ -94,7 +94,7 @@ class ConnectionStatusCard extends StatelessWidget {
                     ),
                   ),
                   Container(
-                    height: 35,
+                    height: 36,
                     width: 1,
                     color: themeProvider.isDarkMode
                         ? Colors.white.withOpacity(0.08)
@@ -111,13 +111,13 @@ class ConnectionStatusCard extends StatelessWidget {
                               'رفع (Upload)',
                               style: theme.textTheme.bodySmall?.copyWith(
                                 color: theme.textTheme.bodySmall?.color
-                                    ?.withOpacity(0.4),
+                                    ?.withOpacity(0.5),
                                 fontSize: 11,
                                 fontWeight: FontWeight.w600,
                                 letterSpacing: 0.1,
                               ),
                             ),
-                            const SizedBox(height: 2),
+                            const SizedBox(height: 3),
                             _buildSpeedInfoWidget('Upload'),
                           ],
                         ),
@@ -125,16 +125,16 @@ class ConnectionStatusCard extends StatelessWidget {
                         Container(
                           padding: const EdgeInsets.all(10),
                           decoration: BoxDecoration(
-                            color: const Color(0xFF34C759).withOpacity(0.08), // iOS Green
+                            color: theme.colorScheme.secondary.withOpacity(0.12),
                             shape: BoxShape.circle,
                             border: Border.all(
-                              color: const Color(0xFF34C759).withOpacity(0.15),
+                              color: theme.colorScheme.secondary.withOpacity(0.2),
                               width: 1.0,
                             ),
                           ),
-                          child: const Icon(
+                          child: Icon(
                             Icons.arrow_upward_rounded,
-                            color: Color(0xFF34C759),
+                            color: theme.colorScheme.secondary,
                             size: 20,
                           ),
                         ),
@@ -153,8 +153,8 @@ class ConnectionStatusCard extends StatelessWidget {
                           Divider(
                             height: 1,
                             color: themeProvider.isDarkMode
-                                ? Colors.white.withOpacity(0.05)
-                                : Colors.black.withOpacity(0.05),
+                                ? Colors.white.withOpacity(0.06)
+                                : Colors.black.withOpacity(0.06),
                           ),
                           const SizedBox(height: 16),
                           _buildSpeedTestButton(theme, themeProvider),
@@ -170,36 +170,53 @@ class ConnectionStatusCard extends StatelessWidget {
   }
 
   Widget _buildSpeedTestButton(ThemeData theme, ThemeProvider themeProvider) {
-    return SizedBox(
+    return Container(
       width: double.infinity,
       height: 48,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(20),
+        gradient: LinearGradient(
+          colors: [
+            theme.colorScheme.primary,
+            theme.colorScheme.tertiary,
+          ],
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: theme.colorScheme.primary.withOpacity(0.35),
+            blurRadius: 16,
+            offset: const Offset(0, 6),
+          ),
+        ],
+      ),
       child: ElevatedButton.icon(
         onPressed: isTestingSpeed ? null : onSpeedTestPressed,
         icon: isTestingSpeed
-            ? SizedBox(
+            ? const SizedBox(
                 width: 18,
                 height: 18,
                 child: CircularProgressIndicator(
                   strokeWidth: 2.5,
-                  color: themeProvider.isDarkMode
-                      ? Colors.white
-                      : theme.colorScheme.primary,
+                  color: Colors.white,
                 ),
               )
             : const Icon(Icons.speed_rounded, size: 20),
         label: Text(
           isTestingSpeed ? 'جاري القياس...' : 'فحص سرعة الاتصال',
-          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+          style: const TextStyle(
+            fontWeight: FontWeight.bold,
+            fontSize: 14,
+            letterSpacing: 0.3,
+          ),
         ),
         style: ElevatedButton.styleFrom(
-          backgroundColor: theme.colorScheme.primary,
+          backgroundColor: Colors.transparent,
+          shadowColor: Colors.transparent,
           foregroundColor: Colors.white,
-          disabledBackgroundColor: theme.colorScheme.primary.withOpacity(0.4),
+          disabledBackgroundColor: Colors.transparent,
           disabledForegroundColor: Colors.white.withOpacity(0.7),
-          elevation: 0,
-          shadowColor: theme.colorScheme.primary.withOpacity(0.3),
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(18),
+            borderRadius: BorderRadius.circular(20),
           ),
         ),
       ),
@@ -229,8 +246,9 @@ class ConnectionStatusCard extends StatelessWidget {
     return Text(
       textToShow,
       style: const TextStyle(
-        fontWeight: FontWeight.bold,
+        fontWeight: FontWeight.w800,
         fontSize: 16,
+        letterSpacing: 0.2,
       ),
     );
   }

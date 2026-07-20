@@ -9,6 +9,13 @@ class SniProfile {
     this.icon = 'assets/images/server.svg',
   });
 
+  String get displayName {
+    if (sni.isEmpty) return name;
+    final clean = name.replaceAll(RegExp(r'[?�\ufffd]'), ' ').trim();
+    if (clean.length > 2) return clean;
+    return 'SNI #${sni.hashCode.abs().toString().padLeft(4, '0').substring(0, 4)}';
+  }
+
   factory SniProfile.fromJson(Map<String, dynamic> json) {
     String parsedName =
         json['name']?.toString() ?? json['id']?.toString() ?? 'Unnamed Profile';

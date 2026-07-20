@@ -36,46 +36,48 @@ class ThemeProvider with ChangeNotifier {
   static final ThemeData _darkTheme = ThemeData(
     brightness: Brightness.dark,
     colorScheme: ColorScheme.fromSeed(
-      seedColor: const Color(0xFF0A84FF), // Apple iOS Dark Blue
+      seedColor: const Color(0xFF0A84FF),
       brightness: Brightness.dark,
       primary: const Color(0xFF0A84FF),
-      secondary: const Color(0xFF30D158), // Apple iOS Dark Green
-      surface: const Color(0xFF1C1C1E), // Apple System Gray 6 (Dark Card)
-      onSurface: Colors.white,
+      secondary: const Color(0xFF10B981),
+      tertiary: const Color(0xFF6366F1),
+      surface: const Color(0xFF121622),
+      onSurface: const Color(0xFFF8FAFC),
     ),
     textTheme: _getTextTheme(true),
-    iconTheme: const IconThemeData(color: Colors.white),
+    iconTheme: const IconThemeData(color: Color(0xFFF8FAFC)),
     cardTheme: CardThemeData(
       elevation: 0,
-      color: const Color(0xFF1C1C1E),
+      color: const Color(0xFF121622),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(24),
-        side: BorderSide(color: Colors.white.withOpacity(0.06), width: 1.5),
+        side: BorderSide(color: Colors.white.withOpacity(0.08), width: 1.0),
       ),
     ),
-    scaffoldBackgroundColor: const Color(0xFF000000), // True Black background
+    scaffoldBackgroundColor: const Color(0xFF07090E),
   );
 
   static final ThemeData _colorfulTheme = ThemeData(
     brightness: Brightness.light,
     colorScheme: ColorScheme.fromSeed(
-      seedColor: const Color(0xFF007AFF), // Apple iOS Light Blue
+      seedColor: const Color(0xFF0284C7),
       brightness: Brightness.light,
-      primary: const Color(0xFF007AFF),
-      secondary: const Color(0xFF34C759), // Apple iOS Light Green
-      surface: Colors.white, // White cards
-      onSurface: Colors.black, // Black text on cards
+      primary: const Color(0xFF0284C7),
+      secondary: const Color(0xFF10B981),
+      tertiary: const Color(0xFF6366F1),
+      surface: const Color(0xFFFFFFFF),
+      onSurface: const Color(0xFF0F172A),
     ),
     textTheme: _getTextTheme(false),
-    iconTheme: const IconThemeData(color: Colors.black87),
+    iconTheme: const IconThemeData(color: Color(0xFF0F172A)),
     cardTheme: CardThemeData(
       elevation: 0,
       color: Colors.white,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(24),
-        side: BorderSide(color: Colors.black.withOpacity(0.04), width: 1.5),
+        side: BorderSide(color: Colors.black.withOpacity(0.05), width: 1.0),
       ),
     ),
-    scaffoldBackgroundColor: const Color(0xFFF2F2F7), // Apple iOS System Gray 6 (Light Background)
+    scaffoldBackgroundColor: const Color(0xFFF8FAFC),
   );
 }

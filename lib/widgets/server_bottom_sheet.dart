@@ -1,3 +1,4 @@
+import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:WaledNet/data/servers.dart';
@@ -22,53 +23,60 @@ class ServerBottomSheet extends StatelessWidget {
     final theme = Theme.of(context);
     final themeProvider = Provider.of<ThemeProvider>(context, listen: false);
 
-    return Container(
-      decoration: BoxDecoration(
-        color: theme.scaffoldBackgroundColor,
-        borderRadius: const BorderRadius.vertical(
-          top: Radius.circular(32),
-        ),
-        border: Border.all(
-          color: themeProvider.isDarkMode
-              ? Colors.white.withOpacity(0.08)
-              : Colors.transparent,
-          width: 1,
-        ),
-      ),
-      padding: const EdgeInsets.only(top: 12, bottom: 24),
-      constraints: BoxConstraints(
-        maxHeight: MediaQuery.of(context).size.height * 0.75,
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          // iOS Style Drag Handle
-          Container(
-            width: 36,
-            height: 5,
-            decoration: BoxDecoration(
-              color: themeProvider.isDarkMode
-                  ? Colors.white.withOpacity(0.2)
-                  : Colors.black.withOpacity(0.15),
-              borderRadius: BorderRadius.circular(10),
-            ),
-          ),
-          const SizedBox(height: 18),
-          Text(
-            'اختر السيرفر المناسب',
-            style: theme.textTheme.titleMedium?.copyWith(
-              fontWeight: FontWeight.bold,
-              fontSize: 18,
-            ),
-          ),
-          const SizedBox(height: 16),
-          Divider(
-            height: 1,
+    return ClipRRect(
+      borderRadius: const BorderRadius.vertical(top: Radius.circular(32)),
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 25, sigmaY: 25),
+        child: Container(
+          decoration: BoxDecoration(
             color: themeProvider.isDarkMode
-                ? Colors.white.withOpacity(0.06)
-                : Colors.black.withOpacity(0.06),
+                ? Colors.white.withOpacity(0.08)
+                : Colors.white.withOpacity(0.6),
+            borderRadius: const BorderRadius.vertical(
+              top: Radius.circular(32),
+            ),
+            border: Border.all(
+              color: themeProvider.isDarkMode
+                  ? Colors.white.withOpacity(0.1)
+                  : Colors.black.withOpacity(0.04),
+              width: 1,
+            ),
           ),
-          const SizedBox(height: 8),
+          padding: const EdgeInsets.only(top: 12, bottom: 24),
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.of(context).size.height * 0.75,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // iOS Style Drag Handle
+              Container(
+                width: 40,
+                height: 5,
+                decoration: BoxDecoration(
+                  color: themeProvider.isDarkMode
+                      ? Colors.white.withOpacity(0.2)
+                      : Colors.black.withOpacity(0.15),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+              ),
+              const SizedBox(height: 18),
+              Text(
+                'اختر السيرفر المناسب',
+                style: theme.textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 18,
+                  letterSpacing: 0.2,
+                ),
+              ),
+              const SizedBox(height: 16),
+              Divider(
+                height: 1,
+                color: themeProvider.isDarkMode
+                    ? Colors.white.withOpacity(0.06)
+                    : Colors.black.withOpacity(0.06),
+              ),
+              const SizedBox(height: 8),
           Flexible(
             child: ListView.builder(
               shrinkWrap: true,
@@ -182,6 +190,8 @@ class ServerBottomSheet extends StatelessWidget {
           ),
         ],
       ),
-    );
+    ),
+  ),
+);
   }
 }

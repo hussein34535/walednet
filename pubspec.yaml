@@ -25,6 +25,7 @@ dependencies:
   unity_ads_plugin: ^0.4.0
   crypto: ^3.0.3
   dartssh2: ^2.22.0
+  in_app_purchase: ^3.3.0
 
 dev_dependencies:
   flutter_test:

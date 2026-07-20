@@ -379,12 +379,13 @@ class SingboxConfigBuilder {
         }
       }
       final query = uri.queryParameters;
+      final useSsl = query['ssl'] == 'true' || query['tls'] == 'true' || port == 443;
       return {
         'host': host,
         'port': port,
         'username': username,
         'password': password,
-        'useSsl': query['ssl'] == 'true',
+        'useSsl': useSsl,
         'sni': query['host'] ?? query['sni'] ?? '',
       };
     } catch (e) {

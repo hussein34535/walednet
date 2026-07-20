@@ -24,7 +24,7 @@ class AdService {
     print('[AdService] Initializing Unity Ads (Game ID: $gameId)...');
     UnityAds.init(
       gameId: gameId,
-      testMode: true, // Keep true for testing, change to false for production
+      testMode: true,
       onComplete: () {
         print('[AdService] Unity Ads initialized successfully!');
         loadRewardedAd();

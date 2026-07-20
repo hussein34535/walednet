@@ -283,7 +283,7 @@ void _sshTunnelIsolateEntry(SendPort mainSendPort) {
           );
 
           mainSendPort.send({'type': 'log', 'message': 'Authenticating...'});
-          await sshClient!.authenticated.timeout(const Duration(seconds: 30));
+          await sshClient!.authenticated.timeout(const Duration(seconds: 15));
 
           if (isClosed) {
             await cleanUp();
@@ -369,4 +369,6 @@ class RawSSHSocket implements SSHSocket {
   Future<void> get done => _socket.done;
   @override
   void destroy() => _socket.destroy();
+  @override
+  Future<void> flush() async {}
 }

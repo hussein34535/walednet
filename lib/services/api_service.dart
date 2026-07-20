@@ -5,11 +5,13 @@ import 'package:crypto/crypto.dart';
 import '../data/servers.dart';
 
 class ApiService {
-  static const String _sniUrl = 'https://waledapis.vercel.app/api/sni';
-  static const String _vlessUrl = 'https://waledapis.vercel.app/api/vless';
-  static const String _sshUrl = 'https://waledapis.vercel.app/api/ssh';
-  static const String _vmessUrl = 'https://waledapis.vercel.app/api/vmess';
-  static const String _slowDnsUrl = 'https://waledapis.vercel.app/api/slowdns';
+  static const String _baseUrl = 'https://waledapis.vercel.app/api';
+  static const String _sniUrl = '$_baseUrl/sni';
+  static const String _vlessUrl = '$_baseUrl/vless';
+  static const String _sshUrl = '$_baseUrl/ssh';
+  static const String _vmessUrl = '$_baseUrl/vmess';
+  static const String _slowDnsUrl = '$_baseUrl/slowdns';
+  static const String _pricingUrl = '$_baseUrl/pricing';
 
   // TODO: Rotate this secret on the server. Current one is exposed.
   // Move to server-side verification + rate limiting / Play Integrity.
@@ -148,7 +150,7 @@ class ApiService {
     }
   }
 
-  static Future<bool> addSniProfile(String name, String host) async {
+  static Future<bool> addSniProfile(String name, String host, {String? deviceId}) async {
     try {
       final headers = await _getHeaders();
       headers['Content-Type'] = 'application/json';
@@ -156,6 +158,7 @@ class ApiService {
       final body = jsonEncode({
         'name': name,
         'host': host,
+        if (deviceId != null) 'device_id': deviceId,
       });
       
       final response = await http.post(
@@ -175,5 +178,44 @@ class ApiService {
       print('[ApiService] Error adding SNI: $e');
       return false;
     }
+  }
+
+  static Future<bool> registerDeviceToken(String token) async {
+    try {
+      final headers = await _getHeaders();
+      headers['Content-Type'] = 'application/json';
+      
+      final body = jsonEncode({'token': token});
+      
+      final response = await http.post(
+        Uri.parse('$_baseUrl/device'),
+        headers: headers,
+        body: body,
+      );
+      
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        print('[ApiService] Device token registered successfully');
+        return true;
+      } else {
+        print('[ApiService] Device token registration failed: ${response.statusCode}');
+        return false;
+      }
+    } catch (e) {
+      print('[ApiService] Error registering device token: $e');
+      return false;
+    }
+  }
+
+  static Future<Map<String, dynamic>> fetchPricing() async {
+    try {
+      final headers = await _getHeaders();
+      final response = await http.get(Uri.parse(_pricingUrl), headers: headers);
+      if (response.statusCode == 200) {
+        return jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
+      }
+    } catch (e) {
+      print('[ApiService] Error fetching pricing: $e');
+    }
+    return {};
   }
 }
