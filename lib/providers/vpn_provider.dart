@@ -194,7 +194,7 @@ class VpnProvider with ChangeNotifier {
         _isConnectionVerified = true;
         if (oldState != VpnState.connected) {
           if (!_isExtendedConnection) {
-            _connectionTime = 0;
+            _connectionTime = 3600;
           }
           startTimer();
         }
@@ -822,7 +822,7 @@ class VpnProvider with ChangeNotifier {
       if (_vpnStatus == 'CONNECTED') {
         if (Platform.isWindows) {
           if (!_isExtendedConnection) {
-            _connectionTime = 0;
+            _connectionTime = 3600;
           }
           startTimer();
         } else if (_connectionTime > 0) {
@@ -835,17 +835,12 @@ class VpnProvider with ChangeNotifier {
   void startTimer() {
     _timer?.cancel();
     _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      if (_isExtendedConnection) {
-        if (_connectionTime > 0) {
-          _connectionTime--;
-          notifyListeners();
-        } else {
-          _timer?.cancel();
-          toggleVpn();
-        }
-      } else {
-        _connectionTime++;
+      if (_connectionTime > 0) {
+        _connectionTime--;
         notifyListeners();
+      } else {
+        _timer?.cancel();
+        toggleVpn();
       }
     });
   }
@@ -969,6 +964,27 @@ class VpnProvider with ChangeNotifier {
 
   void loadFreshRewardedAd() {
     _adService.loadRewardedAd();
+  }
+
+  void extendConnection() {
+    if (SubscriptionService().isPremium) {
+      _connectionTime = 86400;
+      _isExtendedConnection = true;
+      notifyListeners();
+      return;
+    }
+    loadFreshRewardedAd();
+    Future.delayed(const Duration(seconds: 3), () {
+      if (!_isRewardedAdReady) return;
+      _adService.showRewardedAdWithCallbacks(
+        onCompleted: () {
+          _connectionTime = 86400;
+          _isExtendedConnection = true;
+          notifyListeners();
+        },
+        onCancelled: () {},
+      );
+    });
   }
 
   void showRewardedAd({

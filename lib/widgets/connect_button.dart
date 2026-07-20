@@ -10,8 +10,10 @@ class ConnectButton extends StatelessWidget {
   final String buttonText;
   final Animation<double> pulseAnimation;
   final VoidCallback onTap;
+  final VoidCallback? onExtend;
   final bool isConnectionVerified;
   final int connectionTime;
+  final bool isExtended;
 
   const ConnectButton({
     super.key,
@@ -22,8 +24,10 @@ class ConnectButton extends StatelessWidget {
     required this.buttonText,
     required this.pulseAnimation,
     required this.onTap,
+    this.onExtend,
     required this.isConnectionVerified,
     required this.connectionTime,
+    this.isExtended = false,
   });
 
   @override
@@ -151,52 +155,96 @@ class ConnectButton extends StatelessWidget {
           },
         ),
         const SizedBox(height: 20),
-        // Status Text
-        Text(
-          isAdLoading && !isConnected ? 'جاري تحميل الإعلان...' : buttonText,
-          style: theme.textTheme.titleMedium?.copyWith(
-            fontWeight: FontWeight.bold,
-            letterSpacing: 0.5,
-            fontSize: 22,
-            color: isConnected ? activeColor : inactiveColor,
-          ),
-        ),
-        // Timer Widget in an elegant capsule
-        AnimatedSize(
-          duration: const Duration(milliseconds: 350),
-          curve: Curves.easeInOut,
-          child: (isConnected && isConnectionVerified)
-              ? Container(
-                  margin: const EdgeInsets.only(top: 12),
-                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-                  decoration: BoxDecoration(
-                    color: activeColor.withOpacity(0.08),
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(
-                      color: activeColor.withOpacity(0.15),
-                      width: 1,
-                    ),
+        // Status Text / Timer
+        if (isFullyConnected && isConnectionVerified)
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+            decoration: BoxDecoration(
+              color: activeColor.withValues(alpha: 0.08),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(
+                color: activeColor.withValues(alpha: 0.15),
+                width: 1,
+              ),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.timer_outlined, size: 16, color: Colors.grey),
+                const SizedBox(width: 6),
+                Text(
+                  'متبقي ',
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: activeColor,
                   ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(Icons.timer_outlined,
-                          size: 16, color: Colors.grey),
-                      const SizedBox(width: 8),
-                      Text(
-                        '${(connectionTime ~/ 3600).toString().padLeft(2, '0')}:${((connectionTime % 3600) ~/ 60).toString().padLeft(2, '0')}:${(connectionTime % 60).toString().padLeft(2, '0')}',
-                        style: const TextStyle(
-                          fontFamily: 'monospace',
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                          letterSpacing: 1.0,
-                        ),
-                      ),
+                ),
+                Text(
+                  '${(connectionTime ~/ 3600).toString().padLeft(2, '0')}:${((connectionTime % 3600) ~/ 60).toString().padLeft(2, '0')}:${(connectionTime % 60).toString().padLeft(2, '0')}',
+                  style: const TextStyle(
+                    fontFamily: 'monospace',
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 1.0,
+                  ),
+                ),
+              ],
+            ),
+          )
+        else
+          Text(
+            isAdLoading && !isConnected ? 'جاري تحميل الإعلان...' : buttonText,
+            style: theme.textTheme.titleMedium?.copyWith(
+              fontWeight: FontWeight.bold,
+              letterSpacing: 0.5,
+              fontSize: 22,
+              color: isConnected ? activeColor : inactiveColor,
+            ),
+          ),
+        // Extend button
+        if (isFullyConnected && !isExtended && onExtend != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 12),
+            child: GestureDetector(
+              onTap: onExtend,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 10),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [
+                      const Color(0xFFFF9500),
+                      const Color(0xFFFF6B35),
                     ],
                   ),
-                )
-              : const SizedBox.shrink(),
-        ),
+                  borderRadius: BorderRadius.circular(24),
+                  boxShadow: [
+                    BoxShadow(
+                      color: const Color(0xFFFF9500).withValues(alpha: 0.35),
+                      blurRadius: 12,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.add_circle_outline_rounded,
+                        size: 18, color: Colors.white),
+                    const SizedBox(width: 8),
+                    const Text(
+                      'مدد لـ 24 ساعة',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 15,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
       ],
     );
   }
