@@ -10,7 +10,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 class GoogleWindowsAuth {
   static const String _clientId =
-      '289358660533-cva5l6i7uesg99b87e5etj0cadaoioj5.apps.googleusercontent.com';
+      '289358660533-cecuqqlkmn3121ha4psh4g696lfreo7g.apps.googleusercontent.com';
   static const String _tokenEndpoint =
       'https://oauth2.googleapis.com/token';
   static const String _authEndpoint =
@@ -55,10 +55,10 @@ class GoogleWindowsAuth {
     });
 
     final server = await HttpServer.bind(InternetAddress.loopbackIPv4, _port);
-    final codeCompleter = Completer<String>();
+    final codeCompleter = Completer<HttpRequest>();
 
     unawaited(
-      _handleCallback(server, state, redirectUri, codeCompleter),
+      _handleCallback(server, state, codeCompleter),
     );
 
     if (!await launchUrl(authUrl, mode: LaunchMode.externalApplication)) {
@@ -67,11 +67,19 @@ class GoogleWindowsAuth {
     }
 
     try {
-      final code = await codeCompleter.future.timeout(
+      final request = await codeCompleter.future.timeout(
         const Duration(minutes: 2),
         onTimeout: () => throw TimeoutException('انتهت مهلة تسجيل الدخول'),
       );
-      return await _exchangeCodeForIdToken(code, redirectUri, codeVerifier);
+      final code = request.uri.queryParameters['code']!;
+      debugPrint('[GoogleWindowsAuth] Code received, exchanging for token...');
+      final idToken = await _exchangeCodeForIdToken(code, redirectUri, codeVerifier);
+      if (idToken != null) {
+        _respond(request, 200, 'تم تسجيل الدخول بنجاح!');
+      } else {
+        _respond(request, 500, 'فشل تسجيل الدخول. حاول مرة أخرى.');
+      }
+      return idToken;
     } finally {
       server.close();
     }
@@ -80,32 +88,29 @@ class GoogleWindowsAuth {
   static Future<void> _handleCallback(
     HttpServer server,
     String expectedState,
-    String redirectUri,
-    Completer<String> codeCompleter,
+    Completer<HttpRequest> requestCompleter,
   ) async {
     try {
       await for (final request in server) {
         if (request.uri.queryParameters.containsKey('code')) {
           final state = request.uri.queryParameters['state'];
           if (state != expectedState) {
-            _respond(request, 400, 'State mismatch');
-            codeCompleter.completeError(Exception('State mismatch'));
+            _respond(request, 400, 'State mismatch - طلب غير صالح');
+            requestCompleter.completeError(Exception('State mismatch'));
             return;
           }
-          final code = request.uri.queryParameters['code']!;
-          _respond(request, 200, 'تم تسجيل الدخول! يمكنك إغلاق هذه الصفحة.');
-          codeCompleter.complete(code);
+          requestCompleter.complete(request);
           return;
         } else if (request.uri.queryParameters.containsKey('error')) {
           _respond(request, 400, 'تم إلغاء تسجيل الدخول');
-          codeCompleter.completeError(Exception('تم إلغاء تسجيل الدخول'));
+          requestCompleter.completeError(Exception('تم إلغاء تسجيل الدخول'));
           return;
         }
         _respond(request, 404, 'Not Found');
       }
     } catch (e) {
-      if (!codeCompleter.isCompleted) {
-        codeCompleter.completeError(e);
+      if (!requestCompleter.isCompleted) {
+        requestCompleter.completeError(e);
       }
     }
   }
