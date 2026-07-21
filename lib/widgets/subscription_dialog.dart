@@ -2,6 +2,7 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:WaledNet/services/subscription_service.dart';
 import 'package:WaledNet/theme_provider.dart';
 
 const _telegramUrl = 'https://t.me/D_S_D_Cbot';
@@ -148,9 +149,9 @@ class SubscriptionDialog extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 8),
-          const Text(
-            '50 ج.م',
-            style: TextStyle(
+          Text(
+            SubscriptionService().priceLabel.isNotEmpty ? SubscriptionService().priceLabel : '50 ج.م',
+            style: const TextStyle(
               fontSize: 36,
               fontWeight: FontWeight.bold,
               color: Color(0xFFFF9500),

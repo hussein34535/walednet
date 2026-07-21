@@ -41,8 +41,9 @@ class SubscriptionService {
   Future<void> _fetchPricing() async {
     final pricing = await ApiService.fetchPricing();
     if (pricing.isNotEmpty) {
-      final rawPrice = pricing['yearly_price']?.toString() ?? '';
-      final currency = pricing['currency']?.toString() ?? '';
+      final sub = pricing['subscription'] as Map<String, dynamic>?;
+      final rawPrice = sub?['yearly_price']?.toString() ?? pricing['yearly_price']?.toString() ?? '';
+      final currency = sub?['currency']?.toString() ?? pricing['currency']?.toString() ?? '';
       if (rawPrice.isNotEmpty) {
         _priceLabel = currency.isNotEmpty ? '$rawPrice $currency' : '$rawPrice ج.م';
         final prefs = await SharedPreferences.getInstance();
