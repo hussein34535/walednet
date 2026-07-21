@@ -21,7 +21,8 @@ class VpnProvider with ChangeNotifier {
   final VpnService _vpnService = VpnService();
   final SshTunnelService _sshTunnel = SshTunnelService();
   static const int _sshLocalPort = 10809;
-  late final AdService _adService;
+  AdService? _adService;
+  bool _adsInitialized = false;
   final SpeedTestService _speedTestService = SpeedTestService();
 
   String _prefKey(String key) {
@@ -281,27 +282,30 @@ class VpnProvider with ChangeNotifier {
         }
       };
 
-      _adService = AdService(
-        onRewardedReadyChanged: (ready) {
-          _isRewardedAdReady = ready;
-          notifyListeners();
-        },
-        onInterstitialReadyChanged: (ready) {
-          _isInterstitialAdReady = ready;
-          notifyListeners();
-        },
-        onAdFailed: _handleAdFailed,
-        onRewardedCompleted: () {
-          _isExtendedConnection = true;
-          _connectionTime = 24 * 60 * 60;
-          _isAdLoading = false;
-          notifyListeners();
-          _connectToVpn();
-        },
-      );
+      if (!_adsInitialized) {
+        _adsInitialized = true;
+        _adService = AdService(
+          onRewardedReadyChanged: (ready) {
+            _isRewardedAdReady = ready;
+            notifyListeners();
+          },
+          onInterstitialReadyChanged: (ready) {
+            _isInterstitialAdReady = ready;
+            notifyListeners();
+          },
+          onAdFailed: _handleAdFailed,
+          onRewardedCompleted: () {
+            _isExtendedConnection = true;
+            _connectionTime = 24 * 60 * 60;
+            _isAdLoading = false;
+            notifyListeners();
+            _connectToVpn();
+          },
+        );
 
-      if (!SubscriptionService().isPremium) {
-        _adService.initialize();
+        if (!SubscriptionService().isPremium) {
+          _adService!.initialize();
+        }
       }
     });
 
@@ -331,15 +335,20 @@ class VpnProvider with ChangeNotifier {
 
     FirebaseAuth.instance.authStateChanges().listen((User? user) {
       if (_disposed) return;
-      _selectedServer = null;
-      _selectedProfile = null;
-      _isConnectionVerified = false;
-      _vpnServers = [];
-      _sniProfiles = [];
-      _isLoading = true;
-      _initialized = false;
-      notifyListeners();
-      initProvider();
+      if (_vpnStatus == 'DISCONNECTED') {
+        _selectedServer = null;
+        _selectedProfile = null;
+        _isConnectionVerified = false;
+        _vpnServers = [];
+        _sniProfiles = [];
+        _isLoading = true;
+        notifyListeners();
+        _loadData().then((_) {
+          _loadSelections();
+          _isLoading = false;
+          notifyListeners();
+        });
+      }
     });
   }
 
@@ -978,7 +987,7 @@ class VpnProvider with ChangeNotifier {
   }
 
   void loadFreshRewardedAd() {
-    _adService.loadRewardedAd();
+    _adService?.loadRewardedAd();
   }
 
   void extendConnection() {
@@ -992,8 +1001,8 @@ class VpnProvider with ChangeNotifier {
     } catch (_) {}
     loadFreshRewardedAd();
     Future.delayed(const Duration(seconds: 2), () {
-      if (_isRewardedAdReady) {
-        _adService.showRewardedAdWithCallbacks(
+      if (_isRewardedAdReady && _adService != null) {
+        _adService!.showRewardedAdWithCallbacks(
           onCompleted: () {
             _connectionTime = 86400;
             _isExtendedConnection = true;
@@ -1016,7 +1025,7 @@ class VpnProvider with ChangeNotifier {
       return;
     }
     if (Platform.isAndroid || Platform.isIOS) {
-      _adService.showRewardedAdWithCallbacks(
+      _adService?.showRewardedAdWithCallbacks(
         onCompleted: onCompleted,
         onCancelled: onCancelled,
       );
