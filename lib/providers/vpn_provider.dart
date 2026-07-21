@@ -84,6 +84,7 @@ class VpnProvider with ChangeNotifier {
   void selectServer(VpnServer server) => handleSelectionChange(server);
   int get connectionTime => _connectionTime;
   bool get isExtendedConnection => _isExtendedConnection;
+  bool get isPremium => SubscriptionService().isPremium;
   bool get isAdLoading => _isAdLoading;
   bool get isRewardedAdReady => _isRewardedAdReady;
   bool get isInterstitialAdReady => _isInterstitialAdReady;
@@ -200,7 +201,9 @@ class VpnProvider with ChangeNotifier {
         _buttonText = 'قطع الاتصال';
         _isConnectionVerified = true;
         if (oldState != VpnState.connected) {
-          if (!_isExtendedConnection) {
+          if (SubscriptionService().isPremium) {
+            _isExtendedConnection = true;
+          } else if (!_isExtendedConnection) {
             _connectionTime = 3600;
           }
           startTimer();
@@ -282,7 +285,7 @@ class VpnProvider with ChangeNotifier {
         }
       };
 
-      if (!_adsInitialized) {
+      if (!_adsInitialized && (Platform.isAndroid || Platform.isIOS)) {
         _adsInitialized = true;
         _adService = AdService(
           onRewardedReadyChanged: (ready) {
@@ -669,9 +672,29 @@ class VpnProvider with ChangeNotifier {
         // VLESS / VMESS / Trojan logic on Windows!
         _addLog('[System] VLESS mode detected on Windows. Building Xray config...');
         try {
+          _addLog('[System] Fetching server TLS certificate SHA256 for pinning...');
+          final vlessUri = Uri.parse(serverUrl);
+          final vlessQuery = vlessUri.queryParameters;
+          final tlsSni = sni ?? vlessQuery['sni'] ?? vlessQuery['host'] ?? vlessUri.host;
+          final isTls = vlessQuery['security'] == 'tls';
+          String? certSha256;
+          if (isTls) {
+            certSha256 = await SingboxConfigBuilder.fetchCertSha256(
+              resolvedIp ?? vlessUri.host,
+              vlessUri.port,
+              tlsSni,
+            );
+            if (certSha256 != null) {
+              _addLog('[System] Certificate SHA256: $certSha256');
+            } else {
+              _addLog('[System] Warning: Could not fetch certificate SHA256.');
+            }
+          }
+
           final xrayConfigJson = SingboxConfigBuilder.buildXrayConfig(
             serverUrl: serverUrl,
             sni: sni,
+            pinnedPeerCertSha256: certSha256,
           );
           
           _addLog('[System] Starting Windows VPN routing via Xray & tun2socks...');
@@ -848,7 +871,9 @@ class VpnProvider with ChangeNotifier {
     } else {
       await _connectToVpn();
       if (_vpnStatus == 'CONNECTED') {
-        if (!_isExtendedConnection) {
+        if (SubscriptionService().isPremium) {
+          _isExtendedConnection = true;
+        } else if (!_isExtendedConnection) {
           _connectionTime = 3600;
         }
         startTimer();
@@ -857,6 +882,7 @@ class VpnProvider with ChangeNotifier {
   }
 
   void startTimer() {
+    if (SubscriptionService().isPremium) return;
     _timer?.cancel();
     _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
       if (_connectionTime > 0) {
@@ -991,14 +1017,9 @@ class VpnProvider with ChangeNotifier {
   }
 
   void extendConnection() {
-    try {
-      if (SubscriptionService().isPremium) {
-        _connectionTime = 86400;
-        _isExtendedConnection = true;
-        notifyListeners();
-        return;
-      }
-    } catch (_) {}
+    if (SubscriptionService().isPremium) {
+      return;
+    }
     loadFreshRewardedAd();
     Future.delayed(const Duration(seconds: 2), () {
       if (_isRewardedAdReady && _adService != null) {

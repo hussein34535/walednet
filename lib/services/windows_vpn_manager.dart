@@ -98,6 +98,9 @@ class WindowsVpnManager {
     required String serverIp,
     String? xrayConfigJson,
   }) async {
+    if (!await isAdmin) {
+      throw Exception('يجب تشغيل التطبيق كمسؤول (Administrator) لتشغيل VPN على ويندوز');
+    }
     await ensureBinaries();
 
     final binPath = await _binDir;

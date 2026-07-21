@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -6,6 +7,7 @@ import 'package:google_sign_in/google_sign_in.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:WaledNet/services/google_windows_auth.dart';
+import 'package:WaledNet/services/admin_service.dart';
 
 class AuthProvider with ChangeNotifier {
   FirebaseAuth? _auth;
@@ -27,6 +29,7 @@ class AuthProvider with ChangeNotifier {
       _user?.displayName ?? _user?.email?.split('@').first ?? 'مستخدم';
   String get email => _user?.email ?? '';
   String? get photoUrl => _user?.photoURL;
+  bool get isAdmin => AdminService().isAdmin;
 
   AuthProvider() {
     try {
@@ -35,6 +38,9 @@ class AuthProvider with ChangeNotifier {
       _auth!.authStateChanges().listen((User? user) {
         _user = user;
         notifyListeners();
+        if (user != null) {
+          AdminService().checkAdminStatus();
+        }
       });
     } catch (e) {
       print('[Auth] Firebase init error: $e');
@@ -104,26 +110,53 @@ class AuthProvider with ChangeNotifier {
     _setLoading(true);
     try {
       String? idToken;
+      String? photoUrl;
+      String? displayName;
 
       if (Platform.isWindows) {
-        idToken = await GoogleWindowsAuth.signIn();
-        if (idToken == null) {
+        final result = await GoogleWindowsAuth.signIn();
+        if (result == null) {
+          debugPrint('[Auth] GoogleWindowsAuth returned null');
           _setLoading(false);
           return false;
         }
+        idToken = result.idToken;
+        photoUrl = result.photoUrl;
+        displayName = result.name;
       } else {
         await _ensureGoogleInitialized();
         final googleUser = await GoogleSignIn.instance.authenticate();
         idToken = googleUser.authentication.idToken;
       }
 
+      debugPrint('[Auth] Got idToken, signing in to Firebase...');
       final credential = GoogleAuthProvider.credential(idToken: idToken);
-      final userCredential = await _auth!.signInWithCredential(credential);
+      final userCredential = await _auth!
+          .signInWithCredential(credential)
+          .timeout(const Duration(seconds: 10));
+      debugPrint('[Auth] Firebase sign-in successful: ${userCredential.user?.email}');
       _user = userCredential.user;
+
+      if (_user != null && Platform.isWindows) {
+        if (photoUrl != null && photoUrl != _user!.photoURL) {
+          await _user!.updatePhotoURL(photoUrl);
+        }
+        if (displayName != null && displayName != _user!.displayName) {
+          await _user!.updateDisplayName(displayName);
+        }
+        _user = _auth?.currentUser;
+      }
+
       await _saveLogin(true);
       _setLoading(false);
       return true;
-    } catch (_) {
+    } on TimeoutException {
+      debugPrint('[Auth] Firebase sign-in timed out');
+      _errorMessage = 'استغرقت عملية تسجيل الدخول وقتاً طويلاً';
+      _setLoading(false);
+      return false;
+    } catch (e) {
+      debugPrint('[Auth] Google sign-in error: $e');
       _errorMessage = 'فشل تسجيل الدخول بجوجل';
       _setLoading(false);
       return false;

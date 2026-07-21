@@ -193,7 +193,7 @@ class _LoginScreenState extends State<LoginScreen>
             _buildAnimatedBackground(isDark),
             SafeArea(
               child: SingleChildScrollView(
-                physics: const BouncingScrollPhysics(),
+                physics: const ClampingScrollPhysics(),
                 padding: EdgeInsets.symmetric(horizontal: size.width * 0.07),
                 child: AnimatedBuilder(
                   animation: _shakeAnim,

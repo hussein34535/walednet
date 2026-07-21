@@ -134,8 +134,8 @@ bool Win32Window::Create(const std::wstring& title,
   UINT dpi = FlutterDesktopGetDpiForMonitor(monitor);
   double scale_factor = dpi / 96.0;
 
-  // Use a resizable window style
-  DWORD window_style = WS_OVERLAPPEDWINDOW;
+  // Use a fixed-size window style (no resize, no maximize)
+  DWORD window_style = WS_OVERLAPPEDWINDOW & ~(WS_THICKFRAME | WS_MAXIMIZEBOX);
 
   HWND window = CreateWindow(
       window_class, title.c_str(), window_style,

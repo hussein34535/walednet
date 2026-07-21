@@ -1,4 +1,6 @@
 import 'dart:convert';
+import 'dart:io';
+import 'package:crypto/crypto.dart' show sha256;
 
 class SingboxConfigBuilder {
   static String build({
@@ -394,9 +396,40 @@ class SingboxConfigBuilder {
     }
   }
 
+  /// Fetches the SHA-256 fingerprint of a server's TLS certificate.
+  /// Connects to [host]:[port] with SNI [sni], accepts any certificate,
+  /// and returns the hex-encoded SHA-256 digest of the DER-encoded cert.
+  static Future<String?> fetchCertSha256(
+    String host,
+    int port,
+    String sni,
+  ) async {
+    try {
+      final rawSocket = await Socket.connect(
+        host,
+        port,
+        timeout: const Duration(seconds: 5),
+      );
+      final secureSocket = await SecureSocket.secure(
+        rawSocket,
+        host: sni,
+        onBadCertificate: (X509Certificate cert) => true,
+      );
+      final derData = secureSocket.peerCertificate?.der;
+      await secureSocket.close();
+      if (derData != null) {
+        return sha256.convert(derData).toString();
+      }
+    } catch (e) {
+      print('fetchCertSha256 error: $e');
+    }
+    return null;
+  }
+
   static String buildXrayConfig({
     required String serverUrl,
     String? sni,
+    String? pinnedPeerCertSha256,
   }) {
     final uri = Uri.parse(serverUrl);
     final uuid = uri.userInfo;
@@ -448,7 +481,9 @@ class SingboxConfigBuilder {
             "security": security,
             if (security == 'tls')
               "tlsSettings": {
-                "serverName": tlsSni
+                "serverName": tlsSni,
+                if (pinnedPeerCertSha256 != null && pinnedPeerCertSha256.isNotEmpty)
+                  "pinnedPeerCertSha256": pinnedPeerCertSha256
               },
             if (security == 'reality')
               "realitySettings": {

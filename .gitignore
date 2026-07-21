@@ -72,3 +72,4 @@ screen*.png
 ui_dump*.xml
 waledbox_capture.txt
 window_dump*.xml
+.env

@@ -166,7 +166,7 @@ class SubscriptionDialog extends StatelessWidget {
           const SizedBox(height: 16),
           _buildFeature(theme, Icons.check_circle_rounded, 'تصفح بدون إعلانات'),
           const SizedBox(height: 6),
-          _buildFeature(theme, Icons.check_circle_rounded, 'اتصال أسرع وأكثر استقراراً'),
+          _buildFeature(theme, Icons.check_circle_rounded, 'اتصال غير محدود المدة'),
           const SizedBox(height: 6),
           _buildFeature(theme, Icons.check_circle_rounded, 'دعم التطبيق والمطور'),
         ],

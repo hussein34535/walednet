@@ -1,7 +1,6 @@
-import 'dart:async';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:in_app_purchase/in_app_purchase.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:WaledNet/services/admin_service.dart';
 import 'package:WaledNet/services/api_service.dart';
 
 class SubscriptionService {
@@ -14,46 +13,29 @@ class SubscriptionService {
     return uid != null ? '${uid}_$key' : 'guest_$key';
   }
 
-  final InAppPurchase _inAppPurchase = InAppPurchase.instance;
-  StreamSubscription<List<PurchaseDetails>>? _purchaseSubscription;
-
   bool _isPremium = false;
   bool get isPremium => _isPremium;
 
-  static const String yearlyId = 'subscription_yearly_50egp';
-  static const List<String> productIds = [yearlyId];
-
-  List<ProductDetails> _products = [];
-  List<ProductDetails> get products => _products;
-
   String _priceLabel = '';
   String get priceLabel => _priceLabel;
-
-  final StreamController<bool> _premiumController = StreamController<bool>.broadcast();
-  Stream<bool> get premiumStream => _premiumController.stream;
 
   Future<void> init() async {
     final prefs = await SharedPreferences.getInstance();
     _isPremium = prefs.getBool(_prefKey('is_premium')) ?? false;
     _priceLabel = prefs.getString(_prefKey('price_label')) ?? '';
-
     await _fetchPricing();
 
-    final available = await _inAppPurchase.isAvailable();
-    if (available) {
-      _purchaseSubscription = _inAppPurchase.purchaseStream.listen(_onPurchaseUpdate);
-      await _loadProducts();
-    } else {
-      print('[Subscription] In-app purchases not available on this device');
+    final user = FirebaseAuth.instance.currentUser;
+    if (user != null) {
+      await AdminService().ensureUserProfile(user);
+      try {
+        final cloudPremium = await AdminService().getUserPremiumStatus(user.uid);
+        if (cloudPremium != _isPremium) {
+          _isPremium = cloudPremium;
+          await prefs.setBool(_prefKey('is_premium'), cloudPremium);
+        }
+      } catch (_) {}
     }
-  }
-
-  Future<void> _loadProducts() async {
-    final available = await _inAppPurchase.queryProductDetails(productIds.toSet());
-    if (available.notFoundIDs.isNotEmpty) {
-      print('[Subscription] Products not found: ${available.notFoundIDs}');
-    }
-    _products = available.productDetails;
   }
 
   Future<void> _fetchPricing() async {
@@ -69,47 +51,10 @@ class SubscriptionService {
     }
   }
 
-  void _onPurchaseUpdate(List<PurchaseDetails> purchases) {
-    for (final purchase in purchases) {
-      switch (purchase.status) {
-        case PurchaseStatus.purchased:
-        case PurchaseStatus.restored:
-          _setPremium(true);
-          _inAppPurchase.completePurchase(purchase);
-        case PurchaseStatus.pending:
-          print('[Subscription] Purchase pending: ${purchase.productID}');
-        case PurchaseStatus.error:
-          print('[Subscription] Purchase error: ${purchase.error}');
-          _inAppPurchase.completePurchase(purchase);
-        default:
-          _inAppPurchase.completePurchase(purchase);
-      }
-    }
-  }
-
-  Future<bool> purchaseProduct(String productId) async {
-    if (_products.isEmpty) return false;
-    final detail = _products.firstWhere(
-      (p) => p.id == productId,
-      orElse: () => _products.first,
-    );
-    final param = PurchaseParam(productDetails: detail);
-    return _inAppPurchase.buyConsumable(purchaseParam: param, autoConsume: false);
-  }
-
-  Future<void> restorePurchases() async {
-    await _inAppPurchase.restorePurchases();
-  }
-
-  Future<void> _setPremium(bool value) async {
+  void setPremium(bool value) {
     _isPremium = value;
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool(_prefKey('is_premium'), value);
-    _premiumController.add(value);
-  }
-
-  void dispose() {
-    _purchaseSubscription?.cancel();
-    _premiumController.close();
+    SharedPreferences.getInstance().then((prefs) {
+      prefs.setBool(_prefKey('is_premium'), value);
+    });
   }
 }

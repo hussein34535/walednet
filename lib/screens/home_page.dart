@@ -15,7 +15,9 @@ import '../widgets/connect_button.dart';
 import '../widgets/connection_status_card.dart';
 import '../widgets/subscription_dialog.dart';
 import '../services/windows_vpn_manager.dart';
+import '../services/admin_service.dart';
 import 'account_screen.dart';
+import 'admin_screen.dart';
 import 'logs_page.dart';
 
 class MyHomePage extends StatefulWidget {
@@ -154,6 +156,7 @@ class _MyHomePageState extends State<MyHomePage>
                       isConnectionVerified: vpnProvider.isConnectionVerified,
                       connectionTime: vpnProvider.connectionTime,
                       isExtended: vpnProvider.isExtendedConnection,
+                      isPremium: vpnProvider.isPremium,
                     ),
                     AnimatedContainer(
                       duration: const Duration(milliseconds: 400),
@@ -198,11 +201,24 @@ class _MyHomePageState extends State<MyHomePage>
       elevation: 0,
       centerTitle: true,
       leading: IconButton(
-        icon: Icon(Icons.person_rounded, color: theme.iconTheme.color, size: 28),
+        icon: SubscriptionService().isPremium
+            ? Badge(
+                backgroundColor: const Color(0xFFF6C453),
+                smallSize: 10,
+                isLabelVisible: false,
+                child: Icon(Icons.person_rounded, color: const Color(0xFFF6C453), size: 28),
+              )
+            : Icon(Icons.person_rounded, color: theme.iconTheme.color, size: 28),
         onPressed: () => Navigator.push(
           context,
           MaterialPageRoute(builder: (context) => const AccountScreen()),
         ),
+        onLongPress: AdminService().isAdmin
+            ? () => Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (context) => const AdminScreen()),
+                )
+            : null,
       ),
       title: Text(
         'WaledNet',

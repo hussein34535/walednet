@@ -14,6 +14,7 @@ class ConnectButton extends StatelessWidget {
   final bool isConnectionVerified;
   final int connectionTime;
   final bool isExtended;
+  final bool isPremium;
 
   const ConnectButton({
     super.key,
@@ -28,6 +29,7 @@ class ConnectButton extends StatelessWidget {
     required this.isConnectionVerified,
     required this.connectionTime,
     this.isExtended = false,
+    this.isPremium = false,
   });
 
   @override
@@ -155,7 +157,34 @@ class ConnectButton extends StatelessWidget {
           },
         ),
         const SizedBox(height: 16),
-        if (isFullyConnected)
+        if (isFullyConnected && isPremium)
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+            decoration: BoxDecoration(
+              color: const Color(0xFFF6C453).withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(
+                color: const Color(0xFFF6C453).withValues(alpha: 0.3),
+                width: 1,
+              ),
+            ),
+            child: const Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.all_inclusive_rounded, size: 16, color: Color(0xFFF6C453)),
+                SizedBox(width: 6),
+                Text(
+                  'غير محدود',
+                  style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
+                    color: Color(0xFFF6C453),
+                  ),
+                ),
+              ],
+            ),
+          )
+        else if (isFullyConnected)
           GestureDetector(
             onTap: onTap,
             child: Container(
@@ -207,7 +236,7 @@ class ConnectButton extends StatelessWidget {
               ),
             ),
           ),
-        if (isFullyConnected && !isExtended && onExtend != null)
+        if (isFullyConnected && !isPremium && !isExtended && onExtend != null)
           Padding(
             padding: const EdgeInsets.only(top: 6),
             child: GestureDetector(
