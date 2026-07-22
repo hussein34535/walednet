@@ -276,6 +276,8 @@ class _MyHomePageState extends State<MyHomePage>
             isTestingSpeed: vpnProvider.isTestingSpeed,
             downloadSpeed: vpnProvider.speedTestResultMbps,
             uploadSpeed: vpnProvider.uploadSpeedTestResultMbps,
+            liveDownlink: vpnProvider.downlink,
+            liveUplink: vpnProvider.uplink,
             onSpeedTestPressed: vpnProvider.runSpeedTest,
           ),
       ],

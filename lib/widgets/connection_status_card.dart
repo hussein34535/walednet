@@ -8,14 +8,18 @@ class ConnectionStatusCard extends StatelessWidget {
   final bool isTestingSpeed;
   final double? downloadSpeed;
   final double? uploadSpeed;
+  final int liveDownlink;
+  final int liveUplink;
   final VoidCallback onSpeedTestPressed;
 
   const ConnectionStatusCard({
     super.key,
     required this.vpnStatus,
     required this.isTestingSpeed,
-    required this.downloadSpeed,
-    required this.uploadSpeed,
+    this.downloadSpeed,
+    this.uploadSpeed,
+    this.liveDownlink = 0,
+    this.liveUplink = 0,
     required this.onSpeedTestPressed,
   });
 
@@ -223,6 +227,15 @@ class ConnectionStatusCard extends StatelessWidget {
     );
   }
 
+  static String formatBitrate(int bytesPerSec) {
+    if (bytesPerSec <= 0) return '0 B/s';
+    if (bytesPerSec < 1024) return '$bytesPerSec B/s';
+    if (bytesPerSec < 1024 * 1024) {
+      return '${(bytesPerSec / 1024).toStringAsFixed(1)} KB/s';
+    }
+    return '${(bytesPerSec / (1024 * 1024)).toStringAsFixed(2)} MB/s';
+  }
+
   Widget _buildSpeedInfoWidget(String label) {
     if (isTestingSpeed) {
       return const SizedBox(
@@ -240,6 +253,11 @@ class ConnectionStatusCard extends StatelessWidget {
         textToShow = "Error";
       } else {
         textToShow = '${result.toStringAsFixed(2)} Mbps';
+      }
+    } else {
+      final liveBps = (label == 'Download') ? liveDownlink : liveUplink;
+      if (liveBps > 0) {
+        textToShow = formatBitrate(liveBps);
       }
     }
 

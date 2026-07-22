@@ -102,13 +102,14 @@ class SingboxConfigBuilder {
             'ip_is_private': true,
             'outbound': 'direct',
           },
-          // Block QUIC (UDP 443) to force fallback to TCP (HTTPS) which works over SSH
-          {
-            'port': [443],
-            'network': ['udp'],
-            'outbound': 'block',
-          },
-          // For SSH, since it doesn't support UDP proxying, route other UDP directly so apps don't hang
+          // Block QUIC (UDP 443) for SSH/SlowDNS to force fallback to TCP (HTTPS), while allowing VLESS/VMess/Trojan to proxy UDP natively
+          if (isSsh || isSlowDns)
+            {
+              'port': [443],
+              'network': ['udp'],
+              'outbound': 'block',
+            },
+          // For SSH, route other UDP directly so non-TCP apps don't hang
           if (isSsh)
             {
               'network': ['udp'],

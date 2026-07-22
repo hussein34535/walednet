@@ -151,6 +151,7 @@ class BoxService : VpnService(), PlatformInterface {
 
     override fun onCreate() {
         super.onCreate()
+        System.setProperty("GOMEMLIMIT", "128MiB")
         instance = this
         createNotificationChannel()
         Log.i(TAG, "BoxService (VpnService) created")
