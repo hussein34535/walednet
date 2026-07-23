@@ -17,6 +17,11 @@ class _UsageStatsScreenState extends State<UsageStatsScreen> {
   DailyUsage? _today;
   bool _loading = true;
 
+  static const _brandA = Color(0xFF4834D4);
+  static const _brandB = Color(0xFF6C5CE7);
+  static const _cyan = Color(0xFF007AFF);
+  static const _orange = Color(0xFFFF9500);
+
   @override
   void initState() {
     super.initState();
@@ -49,11 +54,12 @@ class _UsageStatsScreenState extends State<UsageStatsScreen> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final themeProvider = Provider.of<ThemeProvider>(context);
+    final isDark = themeProvider.isDarkMode;
 
     return Scaffold(
       extendBodyBehindAppBar: true,
       appBar: AppBar(
-        title: const Text('إحصائيات استخدام البيانات 📊'),
+        title: const Text('إحصائيات الاستخدام 📊'),
         centerTitle: true,
         backgroundColor: Colors.transparent,
         elevation: 0,
@@ -64,13 +70,13 @@ class _UsageStatsScreenState extends State<UsageStatsScreen> {
           gradient: LinearGradient(
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
-            colors: themeProvider.isDarkMode
+            colors: isDark
                 ? [
-                    const Color(0xFF0F1018),
-                    const Color(0xFF181926),
+                    const Color(0xFF0C0D14),
+                    const Color(0xFF161726),
                   ]
                 : [
-                    const Color(0xFFF2F4F7),
+                    const Color(0xFFF2F4F8),
                     Colors.white,
                   ],
           ),
@@ -81,46 +87,64 @@ class _UsageStatsScreenState extends State<UsageStatsScreen> {
               : RefreshIndicator(
                   onRefresh: _loadData,
                   child: ListView(
-                    padding: const EdgeInsets.all(16),
+                    padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
                     physics: const BouncingScrollPhysics(),
                     children: [
-                      // Today Summary Card
-                      _buildTodayCard(theme, themeProvider),
+                      // Today Hero Dashboard Card
+                      _buildTodayHeroCard(theme, isDark),
                       const SizedBox(height: 24),
 
-                      // Section Title
+                      // Section Title Row
                       Row(
                         children: [
-                          Icon(
-                            Icons.history_toggle_off_rounded,
-                            size: 22,
-                            color: theme.colorScheme.primary,
+                          Container(
+                            padding: const EdgeInsets.all(6),
+                            decoration: BoxDecoration(
+                              color: _brandA.withValues(alpha: 0.12),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: const Icon(
+                              Icons.calendar_month_rounded,
+                              size: 18,
+                              color: _brandB,
+                            ),
                           ),
-                          const SizedBox(width: 8),
+                          const SizedBox(width: 10),
                           Text(
-                            'سجل الاستخدام (آخر 30 يومًا)',
+                            'سجل الاستخدام اليومي (آخر 30 يومًا)',
                             style: theme.textTheme.titleMedium?.copyWith(
                               fontWeight: FontWeight.bold,
+                              fontSize: 15,
                             ),
                           ),
                         ],
                       ),
-                      const SizedBox(height: 12),
+                      const SizedBox(height: 14),
 
-                      // Usage History List
+                      // List of Usage History
                       if (_history.isEmpty)
                         Container(
-                          padding: const EdgeInsets.all(24),
+                          padding: const EdgeInsets.all(32),
                           alignment: Alignment.center,
-                          child: Text(
-                            'لا يوجد سجل استخدام سابق حتى الآن',
-                            style: theme.textTheme.bodyMedium?.copyWith(
-                              color: theme.colorScheme.onSurface.withValues(alpha: 0.5),
-                            ),
+                          child: Column(
+                            children: [
+                              Icon(
+                                Icons.data_usage_rounded,
+                                size: 48,
+                                color: theme.colorScheme.onSurface.withValues(alpha: 0.3),
+                              ),
+                              const SizedBox(height: 12),
+                              Text(
+                                'لا يوجد سجل استهلاك بيانات سابق حتى الآن',
+                                style: theme.textTheme.bodyMedium?.copyWith(
+                                  color: theme.colorScheme.onSurface.withValues(alpha: 0.5),
+                                ),
+                              ),
+                            ],
                           ),
                         )
                       else
-                        ..._history.map((usage) => _buildDayTile(usage, theme, themeProvider)),
+                        ..._history.map((usage) => _buildDayTile(usage, theme, isDark)),
                     ],
                   ),
                 ),
@@ -129,97 +153,157 @@ class _UsageStatsScreenState extends State<UsageStatsScreen> {
     );
   }
 
-  Widget _buildTodayCard(ThemeData theme, ThemeProvider themeProvider) {
+  Widget _buildTodayHeroCard(ThemeData theme, bool isDark) {
     final usage = _today;
-    final totalStr = _formatBytes(usage?.totalBytes ?? 0);
-    final upStr = _formatBytes(usage?.uploadBytes ?? 0);
-    final downStr = _formatBytes(usage?.downloadBytes ?? 0);
+    final totalBytes = usage?.totalBytes ?? 0;
+    final upBytes = usage?.uploadBytes ?? 0;
+    final downBytes = usage?.downloadBytes ?? 0;
+
+    final totalStr = _formatBytes(totalBytes);
+    final upStr = _formatBytes(upBytes);
+    final downStr = _formatBytes(downBytes);
+
+    final double downRatio = totalBytes > 0 ? (downBytes / totalBytes).clamp(0.05, 0.95) : 0.5;
 
     return ClipRRect(
-      borderRadius: BorderRadius.circular(24),
+      borderRadius: BorderRadius.circular(28),
       child: BackdropFilter(
         filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
         child: Container(
           padding: const EdgeInsets.all(22),
           decoration: BoxDecoration(
-            color: themeProvider.isDarkMode
-                ? Colors.white.withValues(alpha: 0.07)
-                : Colors.white.withValues(alpha: 0.8),
-            borderRadius: BorderRadius.circular(24),
+            color: isDark
+                ? Colors.white.withValues(alpha: 0.06)
+                : Colors.white.withValues(alpha: 0.85),
+            borderRadius: BorderRadius.circular(28),
             border: Border.all(
-              color: themeProvider.isDarkMode
+              color: isDark
                   ? Colors.white.withValues(alpha: 0.12)
-                  : Colors.black.withValues(alpha: 0.05),
+                  : Colors.black.withValues(alpha: 0.06),
+              width: 1.2,
             ),
             boxShadow: [
               BoxShadow(
-                color: theme.colorScheme.primary.withValues(alpha: 0.1),
-                blurRadius: 20,
-                offset: const Offset(0, 8),
+                color: _brandA.withValues(alpha: isDark ? 0.25 : 0.06),
+                blurRadius: 24,
+                offset: const Offset(0, 10),
               ),
             ],
           ),
           child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              // Top Label & Date Badge
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text(
-                    'استهلاك اليوم',
-                    style: theme.textTheme.titleMedium?.copyWith(
-                      color: theme.colorScheme.onSurface.withValues(alpha: 0.7),
-                      fontWeight: FontWeight.w600,
-                    ),
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          gradient: const LinearGradient(colors: [_brandA, _brandB]),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: const Icon(
+                          Icons.bar_chart_rounded,
+                          color: Colors.white,
+                          size: 18,
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Text(
+                        'استهلاك اليوم',
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 16,
+                        ),
+                      ),
+                    ],
                   ),
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
                     decoration: BoxDecoration(
-                      color: theme.colorScheme.primary.withValues(alpha: 0.12),
-                      borderRadius: BorderRadius.circular(12),
+                      color: _brandA.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: _brandB.withValues(alpha: 0.3)),
                     ),
                     child: Text(
                       _today?.date ?? 'اليوم',
-                      style: theme.textTheme.labelSmall?.copyWith(
-                        color: theme.colorScheme.primary,
-                        fontWeight: FontWeight.bold,
+                      style: const TextStyle(
+                        color: _brandB,
+                        fontWeight: FontWeight.w800,
+                        fontSize: 12,
                       ),
                     ),
                   ),
                 ],
               ),
-              const SizedBox(height: 14),
+              const SizedBox(height: 20),
 
-              // Total Bytes Large Text
-              Text(
-                totalStr,
-                style: theme.textTheme.headlineMedium?.copyWith(
-                  fontWeight: FontWeight.bold,
-                  color: theme.colorScheme.primary,
-                  letterSpacing: 0.5,
+              // Total Bytes Main Number Display
+              Center(
+                child: Column(
+                  children: [
+                    Text(
+                      totalStr,
+                      style: const TextStyle(
+                        fontSize: 36,
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: 0.5,
+                        color: _cyan,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'إجمالي الحركة التراكمية اليوم',
+                      style: TextStyle(
+                        fontSize: 12.5,
+                        color: theme.colorScheme.onSurface.withValues(alpha: 0.5),
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
                 ),
               ),
               const SizedBox(height: 20),
 
-              const Divider(height: 1),
-              const SizedBox(height: 16),
+              // Download / Upload Visual Bar Meter
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(8),
+                    child: SizedBox(
+                      height: 10,
+                      child: Row(
+                        children: [
+                          Expanded(
+                            flex: (downRatio * 100).toInt(),
+                            child: Container(color: _cyan),
+                          ),
+                          const SizedBox(width: 2),
+                          Expanded(
+                            flex: ((1.0 - downRatio) * 100).toInt(),
+                            child: Container(color: _orange),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 20),
 
-              // Stats Row (Upload / Download / Sessions)
+              // 3 Metric Stat Pillars (Download, Upload, Sessions)
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceAround,
                 children: [
-                  _statColumn('⬆️ رفع البيانات', upStr, theme),
-                  Container(
-                    height: 30,
-                    width: 1,
-                    color: theme.dividerColor.withValues(alpha: 0.4),
-                  ),
-                  _statColumn('⬇️ تنزيل البيانات', downStr, theme),
-                  Container(
-                    height: 30,
-                    width: 1,
-                    color: theme.dividerColor.withValues(alpha: 0.4),
-                  ),
-                  _statColumn('🔗 عدد الجلسات', '${usage?.sessionCount ?? 0}', theme),
+                  _metricPillar('⬇️ التنزيل', downStr, _cyan, theme),
+                  Container(height: 32, width: 1, color: theme.dividerColor.withValues(alpha: 0.3)),
+                  _metricPillar('⬆️ الرفع', upStr, _orange, theme),
+                  Container(height: 32, width: 1, color: theme.dividerColor.withValues(alpha: 0.3)),
+                  _metricPillar('🔗 الجلسات', '${usage?.sessionCount ?? 0}', _brandB, theme),
                 ],
               ),
             ],
@@ -229,74 +313,113 @@ class _UsageStatsScreenState extends State<UsageStatsScreen> {
     );
   }
 
-  Widget _statColumn(String label, String value, ThemeData theme) {
+  Widget _metricPillar(String label, String value, Color color, ThemeData theme) {
     return Column(
       children: [
         Text(
           label,
-          style: theme.textTheme.bodySmall?.copyWith(
+          style: TextStyle(
+            fontSize: 12,
             color: theme.colorScheme.onSurface.withValues(alpha: 0.6),
+            fontWeight: FontWeight.w600,
           ),
         ),
         const SizedBox(height: 4),
         Text(
           value,
-          style: theme.textTheme.titleSmall?.copyWith(
-            fontWeight: FontWeight.bold,
+          style: TextStyle(
+            fontSize: 14.5,
+            fontWeight: FontWeight.w800,
+            color: color,
           ),
         ),
       ],
     );
   }
 
-  Widget _buildDayTile(DailyUsage usage, ThemeData theme, ThemeProvider themeProvider) {
+  Widget _buildDayTile(DailyUsage usage, ThemeData theme, bool isDark) {
     return Container(
-      margin: const EdgeInsets.only(bottom: 10),
+      margin: const EdgeInsets.only(bottom: 12),
       decoration: BoxDecoration(
-        color: themeProvider.isDarkMode
+        color: isDark
             ? Colors.white.withValues(alpha: 0.04)
             : Colors.white,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(20),
         border: Border.all(
-          color: themeProvider.isDarkMode
-              ? Colors.white.withValues(alpha: 0.06)
-              : Colors.black.withValues(alpha: 0.04),
+          color: isDark
+              ? Colors.white.withValues(alpha: 0.07)
+              : Colors.black.withValues(alpha: 0.05),
         ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: isDark ? 0.15 : 0.02),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
       ),
-      child: ListTile(
-        leading: CircleAvatar(
-          backgroundColor: theme.colorScheme.primary.withValues(alpha: 0.1),
-          child: Icon(
-            Icons.data_usage_rounded,
-            color: theme.colorScheme.primary,
-            size: 20,
-          ),
-        ),
-        title: Text(
-          usage.date,
-          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
-        ),
-        subtitle: Text(
-          '⬆️ ${_formatBytes(usage.uploadBytes)}  |  ⬇️ ${_formatBytes(usage.downloadBytes)}',
-          style: TextStyle(
-            fontSize: 12,
-            color: theme.colorScheme.onSurface.withValues(alpha: 0.6),
-          ),
-        ),
-        trailing: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-          decoration: BoxDecoration(
-            color: theme.colorScheme.primary.withValues(alpha: 0.08),
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: Text(
-            _formatBytes(usage.totalBytes),
-            style: TextStyle(
-              fontWeight: FontWeight.bold,
-              fontSize: 13,
-              color: theme.colorScheme.primary,
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: _brandA.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(14),
+              ),
+              child: const Icon(
+                Icons.analytics_rounded,
+                color: _brandB,
+                size: 22,
+              ),
             ),
-          ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    usage.date,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w800,
+                      fontSize: 14.5,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Row(
+                    children: [
+                      Text(
+                        '⬇️ ${_formatBytes(usage.downloadBytes)}',
+                        style: const TextStyle(fontSize: 12, color: _cyan, fontWeight: FontWeight.bold),
+                      ),
+                      const SizedBox(width: 10),
+                      Text(
+                        '⬆️ ${_formatBytes(usage.uploadBytes)}',
+                        style: const TextStyle(fontSize: 12, color: _orange, fontWeight: FontWeight.bold),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+              decoration: BoxDecoration(
+                color: _cyan.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: _cyan.withValues(alpha: 0.25)),
+              ),
+              child: Text(
+                _formatBytes(usage.totalBytes),
+                style: const TextStyle(
+                  fontWeight: FontWeight.w900,
+                  fontSize: 13.5,
+                  color: _cyan,
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );
