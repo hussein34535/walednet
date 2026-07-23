@@ -16,6 +16,7 @@ import 'package:WaledNet/services/singbox_config_builder.dart';
 import 'package:WaledNet/services/ssh_tunnel_service.dart';
 import 'package:WaledNet/services/windows_vpn_manager.dart';
 import 'package:WaledNet/services/subscription_service.dart';
+import 'package:WaledNet/services/usage_tracker_service.dart';
 
 class VpnProvider with ChangeNotifier {
   final VpnService _vpnService = VpnService();
@@ -84,16 +85,18 @@ class VpnProvider with ChangeNotifier {
   void toggleConnection() => toggleVpn();
   int? getServerDelay(String url) => _serverDelays[url];
   void selectServer(VpnServer server) => handleSelectionChange(server);
-  int get connectionTime => _connectionTime;
+  int get connectionTime {
+    if (_isReferralPremium && _referralExpiryMs > 0) {
+      final remaining = (_referralExpiryMs - DateTime.now().millisecondsSinceEpoch) ~/ 1000;
+      return remaining > 0 ? remaining : 0;
+    }
+    return _connectionTime;
+  }
   bool get isExtendedConnection => _isExtendedConnection;
 
   bool get _checkReferralValid {
     if (_referralExpiryMs == 0) return _isReferralPremium;
-    final isValid = DateTime.now().millisecondsSinceEpoch < _referralExpiryMs;
-    if (!isValid && _isReferralPremium) {
-      _isReferralPremium = false;
-    }
-    return isValid && _isReferralPremium;
+    return DateTime.now().millisecondsSinceEpoch < _referralExpiryMs;
   }
 
   bool get isPremium => SubscriptionService().isPremium || _checkReferralValid;
@@ -207,12 +210,18 @@ class VpnProvider with ChangeNotifier {
     _uplink = status.uplink;
     _downlink = status.downlink;
 
+    if (_uplink > 0 || _downlink > 0) {
+      UsageTrackerService().updateTraffic(_uplink, _downlink);
+    }
+
     switch (status.state) {
       case VpnState.connected:
         _vpnStatus = 'CONNECTED';
         _buttonText = 'قطع الاتصال';
         _isConnectionVerified = true;
         if (oldState != VpnState.connected) {
+          UsageTrackerService().startTracking();
+          UsageTrackerService().incrementSession();
           if (SubscriptionService().isPremium) {
             _isExtendedConnection = true;
           } else if (!_isExtendedConnection) {
@@ -231,12 +240,14 @@ class VpnProvider with ChangeNotifier {
         _buttonText = 'اتصال';
         _isConnectionVerified = false;
         stopTimer();
+        UsageTrackerService().stopTracking();
         break;
       case VpnState.error:
         _vpnStatus = 'DISCONNECTED';
         _buttonText = 'اتصال';
         _isConnectionVerified = false;
         stopTimer();
+        UsageTrackerService().stopTracking();
         break;
     }
     notifyListeners();
