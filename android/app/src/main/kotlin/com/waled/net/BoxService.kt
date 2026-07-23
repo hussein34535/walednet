@@ -120,8 +120,12 @@ class BoxService : VpnService(), PlatformInterface {
             try {
                 while (it.hasNext()) {
                     val entry = it.next() ?: continue
-                    Log.i(TAG, "[Core] ${entry.message}")
-                    logListener?.invoke(entry.message)
+                    val msg = entry.message ?: continue
+                    if (msg.startsWith("TRACE") || msg.startsWith("DEBUG")) {
+                        continue
+                    }
+                    Log.i(TAG, "[Core] $msg")
+                    logListener?.invoke(msg)
                 }
             } catch (e: Exception) {
                 Log.w(TAG, "writeLogs error: ${e.message}")

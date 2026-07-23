@@ -79,9 +79,12 @@ class SshTunnelService {
       } catch (_) {}
       _isolateSendPort = null;
     }
+    
+    await Future.delayed(const Duration(milliseconds: 100));
+    try { _isolate?.kill(priority: Isolate.immediate); } catch (_) {}
+    _isolate = null;
     _receivePort?.close();
     _receivePort = null;
-    _isolate = null;
 
     _host = null;
     _log('Stopped by user');
@@ -159,7 +162,7 @@ class SshTunnelService {
 
     try {
       _isolate = await Isolate.spawn(_sshTunnelIsolateEntry, _receivePort!.sendPort);
-      await connectCompleter.future;
+      await connectCompleter.future.timeout(const Duration(seconds: 35));
     } catch (e) {
       if (!_hasEverConnected) {
         rethrow;
@@ -240,56 +243,89 @@ void _sshTunnelIsolateEntry(SendPort mainSendPort) {
         }
 
         try {
-          mainSendPort.send({'type': 'log', 'message': 'Connecting to $host:$port (SSL=$useSsl, SNI=$sni)'});
-          
-          Socket baseSocket = await Socket.connect(
-            host,
-            port,
-            timeout: const Duration(seconds: 10),
-          );
-          if (isClosed) {
-            baseSocket.destroy();
-            return;
-          }
-          activeSocket = baseSocket;
-          mainSendPort.send({'type': 'log', 'message': 'TCP connected'});
+          final candidates = [
+            {'port': port, 'useSsl': useSsl},
+          ];
 
-          if (useSsl) {
-            final sniHost = (sni != null && sni.isNotEmpty) ? sni : host;
-            mainSendPort.send({'type': 'log', 'message': 'Securing with TLS. SNI: $sniHost'});
-            final secureSocket = await SecureSocket.secure(
-              baseSocket,
-              host: sniHost,
-              onBadCertificate: (_) {
-                mainSendPort.send({'type': 'log', 'message': 'Bad TLS cert accepted (SSH-over-TLS)'});
-                return true;
-              },
-            ).timeout(const Duration(seconds: 10));
+        Object? lastError;
+        for (int i = 0; i < candidates.length; i++) {
+          final cand = candidates[i];
+          final curPort = cand['port'] as int;
+          final curUseSsl = cand['useSsl'] as bool;
 
+          try {
+            mainSendPort.send({
+              'type': 'log',
+              'message': 'Connecting to $host:$curPort (SSL=$curUseSsl, SNI=$sni)'
+            });
+
+            Socket baseSocket = await Socket.connect(
+              host,
+              curPort,
+              timeout: const Duration(seconds: 6),
+            );
+            baseSocket.setOption(SocketOption.tcpNoDelay, true);
             if (isClosed) {
-              secureSocket.destroy();
+              baseSocket.destroy();
               return;
             }
-            activeSocket = secureSocket;
-            mainSendPort.send({'type': 'log', 'message': 'TLS secured'});
-          }
+            activeSocket = baseSocket;
+            mainSendPort.send({'type': 'log', 'message': 'TCP connected on port $curPort'});
 
-          mainSendPort.send({'type': 'log', 'message': 'Initializing SSH client...'});
-          sshClient = SSHClient(
-            RawSSHSocket(activeSocket!),
-            username: username,
-            onPasswordRequest: () => password,
-            keepAliveInterval: const Duration(seconds: 20),
-          );
+            if (curUseSsl) {
+              final sniHost = (sni != null && sni.isNotEmpty) ? sni : host;
+              mainSendPort.send({'type': 'log', 'message': 'Securing with TLS. SNI: $sniHost'});
+              final secureSocket = await SecureSocket.secure(
+                baseSocket,
+                host: sniHost,
+                onBadCertificate: (_) {
+                  mainSendPort.send({'type': 'log', 'message': 'Bad TLS cert accepted'});
+                  return true;
+                },
+              ).timeout(const Duration(seconds: 8));
 
-          mainSendPort.send({'type': 'log', 'message': 'Authenticating...'});
-          await sshClient!.authenticated.timeout(const Duration(seconds: 15));
+              if (isClosed) {
+                secureSocket.destroy();
+                return;
+              }
+              activeSocket = secureSocket;
+              mainSendPort.send({'type': 'log', 'message': 'TLS secured'});
+            }
 
-          if (isClosed) {
+            mainSendPort.send({'type': 'log', 'message': 'Initializing SSH client...'});
+            sshClient = SSHClient(
+              RawSSHSocket(activeSocket!),
+              username: username,
+              onPasswordRequest: () => password,
+              keepAliveInterval: const Duration(seconds: 20),
+            );
+
+            mainSendPort.send({'type': 'log', 'message': 'Authenticating...'});
+            await sshClient!.authenticated.timeout(const Duration(seconds: 25));
+
+            if (isClosed) {
+              await cleanUp();
+              return;
+            }
+            mainSendPort.send({'type': 'log', 'message': 'SSH authenticated √'});
+            lastError = null;
+            break;
+          } catch (e) {
+            lastError = e;
             await cleanUp();
-            return;
+            if (i < candidates.length - 1) {
+              final nextCand = candidates[i + 1];
+              mainSendPort.send({
+                'type': 'log',
+                'message': 'Port $curPort failed ($e). Auto-falling back to port ${nextCand['port']}...'
+              });
+            }
           }
-          mainSendPort.send({'type': 'log', 'message': 'SSH authenticated √'});
+        }
+
+        if (lastError != null || sshClient == null) {
+          throw lastError ?? Exception('SSH connection failed on all ports');
+        }
 
           mainSendPort.send({'type': 'log', 'message': 'Starting SOCKS5 proxy on 127.0.0.1:$localPort...'});
           forward = await sshClient!.forwardDynamic(
@@ -370,5 +406,5 @@ class RawSSHSocket implements SSHSocket {
   @override
   void destroy() => _socket.destroy();
   @override
-  Future<void> flush() async {}
+  Future<void> flush() => _socket.flush();
 }

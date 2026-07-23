@@ -1007,6 +1007,7 @@ class VpnProvider with ChangeNotifier {
     _disposed = true;
     _timer?.cancel();
     _adLoadTimer?.cancel();
+    _logNotifyTimer?.cancel();
     _sshTunnel.stopTunnel();
     _vpnService.dispose();
     super.dispose();

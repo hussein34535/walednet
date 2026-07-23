@@ -24,7 +24,7 @@ class SingboxConfigBuilder {
 
     final config = {
       'log': {
-        'level': 'info',
+        'level': 'warn',
         'timestamp': true,
       },
       'dns': {
