@@ -14,9 +14,9 @@ import '../widgets/profile_bottom_sheet.dart';
 import '../widgets/connect_button.dart';
 import '../widgets/connection_status_card.dart';
 import '../widgets/subscription_dialog.dart';
+import '../widgets/app_side_drawer.dart';
 import '../services/windows_vpn_manager.dart';
 import '../services/admin_service.dart';
-import 'account_screen.dart';
 import 'admin_screen.dart';
 import 'logs_page.dart';
 
@@ -33,10 +33,7 @@ class _MyHomePageState extends State<MyHomePage>
   late final Animation<double> _pulseAnimation;
   AppLifecycleListener? _lifecycleListener;
   VpnProvider? _vpnProvider;
-  String? _lastStatus;
 
-  final Uri _telegramUrl = Uri.parse('https://t.me/D_S_D_C1');
-  final Uri _subscriptionUrl = Uri.parse('https://t.me/D_S_D_Cbot');
   @override
   void initState() {
     super.initState();
@@ -59,28 +56,9 @@ class _MyHomePageState extends State<MyHomePage>
       if (mounted) {
         _vpnProvider = Provider.of<VpnProvider>(context, listen: false);
         _vpnProvider!.addListener(_vpnListener);
-        _lastStatus = _vpnProvider!.vpnStatus;
         _vpnProvider!.initProvider();
       }
     });
-  }
-
-  Future<void> _launchUrl(Uri url) async {
-    try {
-      if (!await launchUrl(url, mode: LaunchMode.externalApplication)) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Could not launch ${url.path}')),
-          );
-        }
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error launching URL: $e')),
-        );
-      }
-    }
   }
 
   @override
@@ -120,6 +98,7 @@ class _MyHomePageState extends State<MyHomePage>
     }
 
     return Scaffold(
+      drawer: const AppSideDrawer(),
       extendBodyBehindAppBar: false,
       appBar: _buildAppBar(themeProvider),
       body: Container(
@@ -200,25 +179,24 @@ class _MyHomePageState extends State<MyHomePage>
       backgroundColor: Colors.transparent,
       elevation: 0,
       centerTitle: true,
-      leading: IconButton(
-        icon: SubscriptionService().isPremium
-            ? Badge(
-                backgroundColor: const Color(0xFFF6C453),
-                smallSize: 10,
-                isLabelVisible: false,
-                child: Icon(Icons.person_rounded, color: const Color(0xFFF6C453), size: 28),
-              )
-            : Icon(Icons.person_rounded, color: theme.iconTheme.color, size: 28),
-        onPressed: () => Navigator.push(
-          context,
-          MaterialPageRoute(builder: (context) => const AccountScreen()),
-        ),
-        onLongPress: AdminService().isAdmin
-            ? () => Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (context) => const AdminScreen()),
+      leading: Builder(
+        builder: (scaffoldCtx) => IconButton(
+          icon: SubscriptionService().isPremium
+              ? const Badge(
+                  backgroundColor: Color(0xFFF6C453),
+                  smallSize: 10,
+                  isLabelVisible: false,
+                  child: Icon(Icons.menu_rounded, color: Color(0xFFF6C453), size: 28),
                 )
-            : null,
+              : Icon(Icons.menu_rounded, color: theme.iconTheme.color, size: 28),
+          onPressed: () => Scaffold.of(scaffoldCtx).openDrawer(),
+          onLongPress: AdminService().isAdmin
+              ? () => Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (context) => const AdminScreen()),
+                  )
+              : null,
+        ),
       ),
       title: Text(
         'WaledNet',
@@ -530,6 +508,6 @@ class _MyHomePageState extends State<MyHomePage>
 
   void _vpnListener() {
     if (!mounted) return;
-    _lastStatus = _vpnProvider!.vpnStatus;
+    setState(() {});
   }
 }

@@ -26,7 +26,7 @@ class AdminService {
     }
     final email = user!.email!.toLowerCase().trim();
 
-    final adminEmails = ['darkshadowdx3@gmail.com', 'waledpro.f@gmail.com'];
+    final adminEmails = ['hussona4635@gmail.com'];
 
     if (adminEmails.contains(email)) {
       _isAdmin = true;
