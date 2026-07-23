@@ -106,14 +106,9 @@ class _ReferralDialogState extends State<ReferralDialog> {
                   // Dialog Header
                   Row(
                     children: [
-                      Container(
-                        width: 46,
-                        height: 46,
-                        padding: const EdgeInsets.all(10),
-                        decoration: BoxDecoration(
-                          color: _appleGreen.withValues(alpha: 0.14),
-                          borderRadius: BorderRadius.circular(14),
-                        ),
+                      SizedBox(
+                        width: 28,
+                        height: 28,
                         child: SvgPicture.asset(
                           'assets/images/gift.svg',
                           colorFilter: const ColorFilter.mode(_appleGreen, BlendMode.srcIn),

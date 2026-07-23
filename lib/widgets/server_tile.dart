@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../theme/app_colors.dart';
 import '../data/servers.dart';
+import 'server_flag_widget.dart';
 
 class ServerTile extends StatelessWidget {
   final VpnServer server;
@@ -50,15 +51,20 @@ class ServerTile extends StatelessWidget {
                 Container(
                   width: 44,
                   height: 44,
+                  padding: const EdgeInsets.all(7),
                   decoration: BoxDecoration(
-                    gradient: isSelected ? AppColors.primaryGradient : null,
-                    color: isSelected ? null : AppColors.darkCardLight,
+                    color: isSelected
+                        ? AppColors.primary.withOpacity(0.18)
+                        : AppColors.darkCardLight,
                     borderRadius: BorderRadius.circular(12),
                   ),
-                  child: Icon(
-                    Icons.dns_rounded,
-                    size: 22,
-                    color: isSelected ? Colors.white : AppColors.textSecondaryDark,
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(6),
+                    child: ServerFlagWidget(
+                      server: server,
+                      width: 30,
+                      height: 22,
+                    ),
                   ),
                 ),
                 const SizedBox(width: 14),
@@ -67,7 +73,7 @@ class ServerTile extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        server.name,
+                        server.cleanName,
                         style: TextStyle(
                           fontSize: 15,
                           fontWeight: FontWeight.w600,

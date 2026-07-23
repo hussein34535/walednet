@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:WaledNet/data/servers.dart';
 import 'package:WaledNet/theme_provider.dart';
+import 'server_flag_widget.dart';
 
 class ServerBottomSheet extends StatelessWidget {
   final List<VpnServer> servers;
@@ -133,19 +134,24 @@ class ServerBottomSheet extends StatelessWidget {
                         onServerSelected(server);
                       },
                       leading: Container(
-                        padding: const EdgeInsets.all(8),
+                        width: 36,
+                        height: 36,
+                        padding: const EdgeInsets.all(5),
                         decoration: BoxDecoration(
-                          color: theme.colorScheme.primary.withOpacity(0.1),
+                          color: theme.colorScheme.primary.withOpacity(0.12),
                           borderRadius: BorderRadius.circular(10),
                         ),
-                        child: Icon(
-                          Icons.dns_rounded,
-                          color: theme.colorScheme.primary,
-                          size: 20,
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(4),
+                          child: ServerFlagWidget(
+                            server: server,
+                            width: 26,
+                            height: 18,
+                          ),
                         ),
                       ),
                       title: Text(
-                        server.name,
+                        server.cleanName,
                         style: TextStyle(
                           fontWeight: isSelected
                               ? FontWeight.bold

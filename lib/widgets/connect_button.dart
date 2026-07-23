@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:WaledNet/theme_provider.dart';
@@ -236,7 +237,7 @@ class ConnectButton extends StatelessWidget {
               ),
             ),
           ),
-        if (isFullyConnected && !isPremium && !isExtended && onExtend != null)
+        if (isFullyConnected && !isPremium && !isExtended && !Platform.isWindows && onExtend != null)
           Padding(
             padding: const EdgeInsets.only(top: 6),
             child: GestureDetector(

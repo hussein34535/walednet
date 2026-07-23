@@ -763,39 +763,41 @@ class _AccountScreenState extends State<AccountScreen>
       child: InkWell(
         onTap: onTap,
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
           child: Row(
             children: [
+              // iOS Settings Badge: Solid Colored Rounded Box + White Vector Icon
               Container(
-                width: 44,
-                height: 44,
-                padding: svgAsset != null ? const EdgeInsets.all(9) : EdgeInsets.zero,
+                width: 30,
+                height: 30,
+                padding: svgAsset != null ? const EdgeInsets.all(6) : EdgeInsets.zero,
                 decoration: BoxDecoration(
-                  color: iconColor.withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(14),
+                  color: iconColor,
+                  borderRadius: BorderRadius.circular(7),
                 ),
                 child: svgAsset != null
                     ? SvgPicture.asset(
                         svgAsset,
-                        colorFilter: ColorFilter.mode(iconColor, BlendMode.srcIn),
+                        colorFilter: const ColorFilter.mode(Colors.white, BlendMode.srcIn),
                       )
-                    : Icon(icon, size: 24, color: iconColor),
+                    : Icon(icon, size: 18, color: Colors.white),
               ),
               const SizedBox(width: 14),
               Expanded(
                 child: Text(
                   title,
                   style: TextStyle(
-                    fontSize: 15.5,
-                    fontWeight: FontWeight.w600,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w400,
                     color: titleColor ?? ink,
+                    letterSpacing: -0.3,
                   ),
                 ),
               ),
               Icon(
                 Icons.chevron_left_rounded,
                 color: muted.withValues(alpha: 0.35),
-                size: 22,
+                size: 20,
               ),
             ],
           ),

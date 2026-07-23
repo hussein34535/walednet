@@ -1,7 +1,7 @@
 name: WaledNet
 description: "WaledNet VPN - sing-box powered"
 publish_to: 'none'
-version: 2.0.0
+version: 2.1.0
 
 environment:
   sdk: '>=3.3.3 <4.0.0'
@@ -34,6 +34,13 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^6.0.0
+  flutter_launcher_icons: ^0.14.3
+
+flutter_launcher_icons:
+  android: "ic_launcher"
+  ios: true
+  image_path: "assets/images/app_icon.png"
+  min_sdk_android: 21
 
 flutter:
   uses-material-design: true

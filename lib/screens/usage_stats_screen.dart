@@ -165,14 +165,9 @@ class _UsageStatsScreenState extends State<UsageStatsScreen> {
             children: [
               Row(
                 children: [
-                  Container(
-                    width: 44,
-                    height: 44,
-                    padding: const EdgeInsets.all(9),
-                    decoration: BoxDecoration(
-                      color: _appleBlue.withValues(alpha: 0.12),
-                      borderRadius: BorderRadius.circular(14),
-                    ),
+                  SizedBox(
+                    width: 26,
+                    height: 26,
                     child: SvgPicture.asset(
                       'assets/images/analytics.svg',
                       colorFilter: const ColorFilter.mode(_appleBlue, BlendMode.srcIn),
@@ -304,14 +299,9 @@ class _UsageStatsScreenState extends State<UsageStatsScreen> {
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
           child: Row(
             children: [
-              Container(
-                width: 30,
-                height: 30,
-                padding: const EdgeInsets.all(6),
-                decoration: BoxDecoration(
-                  color: _appleBlue.withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(8),
-                ),
+              SizedBox(
+                width: 22,
+                height: 22,
                 child: SvgPicture.asset(
                   'assets/images/analytics.svg',
                   colorFilter: const ColorFilter.mode(_appleBlue, BlendMode.srcIn),

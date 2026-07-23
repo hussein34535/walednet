@@ -224,6 +224,8 @@ class VpnProvider with ChangeNotifier {
           UsageTrackerService().incrementSession();
           if (SubscriptionService().isPremium) {
             _isExtendedConnection = true;
+          } else if (Platform.isWindows) {
+            _connectionTime = 12 * 3600;
           } else if (!_isExtendedConnection) {
             _connectionTime = 3600;
           }
@@ -907,6 +909,8 @@ class VpnProvider with ChangeNotifier {
       if (_vpnStatus == 'CONNECTED') {
         if (SubscriptionService().isPremium) {
           _isExtendedConnection = true;
+        } else if (Platform.isWindows) {
+          _connectionTime = 12 * 3600;
         } else if (!_isExtendedConnection) {
           _connectionTime = 3600;
         }
@@ -1067,7 +1071,7 @@ class VpnProvider with ChangeNotifier {
   }
 
   void extendConnection() {
-    if (SubscriptionService().isPremium) {
+    if (SubscriptionService().isPremium || Platform.isWindows) {
       return;
     }
     loadFreshRewardedAd();

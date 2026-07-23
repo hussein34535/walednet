@@ -1,10 +1,8 @@
 import 'dart:io';
 import 'dart:ui';
-import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:provider/provider.dart';
-import 'package:url_launcher/url_launcher.dart';
 import 'package:WaledNet/theme_provider.dart';
 import 'package:WaledNet/providers/vpn_provider.dart';
 import 'package:WaledNet/data/servers.dart';
@@ -14,8 +12,12 @@ import '../widgets/profile_bottom_sheet.dart';
 import '../widgets/connect_button.dart';
 import '../widgets/connection_status_card.dart';
 import '../widgets/subscription_dialog.dart';
+import '../widgets/server_flag_widget.dart';
+import '../widgets/desktop_3d_stage.dart';
+import '../widgets/mini_mascot_assistant.dart';
 import '../services/windows_vpn_manager.dart';
 import '../services/admin_service.dart';
+import 'package:WaledNet/providers/auth_provider.dart';
 import 'account_screen.dart';
 import 'admin_screen.dart';
 import 'logs_page.dart';
@@ -33,21 +35,21 @@ class _MyHomePageState extends State<MyHomePage>
   late final Animation<double> _pulseAnimation;
   AppLifecycleListener? _lifecycleListener;
   VpnProvider? _vpnProvider;
+  bool _adsInitialized = false;
+
+  void _vpnListener() {
+    if (mounted) setState(() {});
+  }
 
   @override
   void initState() {
     super.initState();
-    if (Platform.isWindows) {
-      _lifecycleListener = AppLifecycleListener(
-        onExitRequested: () async {
-          await WindowsVpnManager.stopVpn();
-          return AppExitResponse.exit;
-        },
-      );
-    }
+    _lifecycleListener = AppLifecycleListener(
+      onStateChange: _handleAppLifecycleStateChange,
+    );
     _pulseController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 1500),
+      duration: const Duration(milliseconds: 1400),
     )..repeat(reverse: true);
     _pulseAnimation = Tween<double>(begin: 1.0, end: 1.12).animate(
       CurvedAnimation(parent: _pulseController, curve: Curves.easeInOut),
@@ -59,6 +61,14 @@ class _MyHomePageState extends State<MyHomePage>
         _vpnProvider!.initProvider();
       }
     });
+  }
+
+  void _handleAppLifecycleStateChange(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      if (mounted && _vpnProvider != null) {
+        _vpnProvider!.initProvider();
+      }
+    }
   }
 
   @override
@@ -105,67 +115,102 @@ class _MyHomePageState extends State<MyHomePage>
           color: theme.scaffoldBackgroundColor,
         ),
         child: SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20.0),
-            child: LayoutBuilder(
-              builder: (context, constraints) {
-                final height = constraints.maxHeight;
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final isDesktopSplit = Platform.isWindows && constraints.maxWidth >= 750;
 
-                final double topSpace = isFullyConnected ? 4 : 24;
-                final double middleSpace = isFullyConnected ? 16 : 36;
-                final double bottomSpace = isFullyConnected ? 12 : 24;
+              Widget mainControls = Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20.0),
+                child: LayoutBuilder(
+                  builder: (context, innerConstraints) {
+                    final height = innerConstraints.maxHeight;
 
-                Widget content = Column(
-                  mainAxisSize: MainAxisSize.min,
+                    final double topSpace = isFullyConnected ? 4 : 24;
+                    final double middleSpace = isFullyConnected ? 16 : 36;
+                    final double bottomSpace = isFullyConnected ? 12 : 24;
+
+                    Widget content = Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        AnimatedContainer(
+                          duration: const Duration(milliseconds: 400),
+                          height: topSpace,
+                        ),
+                        ConnectButton(
+                          isConnected: isConnected,
+                          isFullyConnected: isFullyConnected,
+                          isButtonLoading: isButtonLoading,
+                          isAdLoading: vpnProvider.isAdLoading,
+                          buttonText: vpnProvider.buttonText,
+                          pulseAnimation: _pulseAnimation,
+                          onTap: vpnProvider.toggleVpn,
+                          onExtend: vpnProvider.extendConnection,
+                          isConnectionVerified: vpnProvider.isConnectionVerified,
+                          connectionTime: vpnProvider.connectionTime,
+                          isExtended: vpnProvider.isExtendedConnection,
+                          isPremium: vpnProvider.isPremium,
+                        ),
+                        AnimatedContainer(
+                          duration: const Duration(milliseconds: 400),
+                          height: middleSpace,
+                        ),
+                        _buildConnectionDetails(vpnProvider, isDesktop: isDesktopSplit),
+                        AnimatedContainer(
+                          duration: const Duration(milliseconds: 400),
+                          height: bottomSpace,
+                        ),
+                      ],
+                    );
+
+                    final bool allowScroll = !Platform.isWindows && (isFullyConnected || height < 640);
+
+                    return SingleChildScrollView(
+                      physics: allowScroll
+                          ? const BouncingScrollPhysics()
+                          : const NeverScrollableScrollPhysics(),
+                      child: ConstrainedBox(
+                        constraints: BoxConstraints(
+                          minHeight: height,
+                        ),
+                        child: Container(
+                          alignment: isFullyConnected ? Alignment.topCenter : Alignment.center,
+                          child: content,
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              );
+
+              if (isDesktopSplit) {
+                return Row(
                   children: [
-                    AnimatedContainer(
-                      duration: const Duration(milliseconds: 400),
-                      height: topSpace,
+                    // Left 48%: Interactive 3D Mascot Character Stage
+                    const Expanded(
+                      flex: 48,
+                      child: Padding(
+                        padding: EdgeInsets.only(left: 16, top: 12, bottom: 16, right: 8),
+                        child: Desktop3dStage(),
+                      ),
                     ),
-                    ConnectButton(
-                      isConnected: isConnected,
-                      isFullyConnected: isFullyConnected,
-                      isButtonLoading: isButtonLoading,
-                      isAdLoading: vpnProvider.isAdLoading,
-                      buttonText: vpnProvider.buttonText,
-                      pulseAnimation: _pulseAnimation,
-                      onTap: vpnProvider.toggleVpn,
-                      onExtend: vpnProvider.extendConnection,
-                      isConnectionVerified: vpnProvider.isConnectionVerified,
-                      connectionTime: vpnProvider.connectionTime,
-                      isExtended: vpnProvider.isExtendedConnection,
-                      isPremium: vpnProvider.isPremium,
-                    ),
-                    AnimatedContainer(
-                      duration: const Duration(milliseconds: 400),
-                      height: middleSpace,
-                    ),
-                    _buildConnectionDetails(vpnProvider),
-                    AnimatedContainer(
-                      duration: const Duration(milliseconds: 400),
-                      height: bottomSpace,
+                    // Right 52%: Controls & Status Panel
+                    Expanded(
+                      flex: 52,
+                      child: mainControls,
                     ),
                   ],
                 );
+              }
 
-                final bool allowScroll = !Platform.isWindows && (isFullyConnected || height < 640);
-
-                return SingleChildScrollView(
-                  physics: allowScroll
-                      ? const BouncingScrollPhysics()
-                      : const NeverScrollableScrollPhysics(),
-                  child: ConstrainedBox(
-                    constraints: BoxConstraints(
-                      minHeight: height,
-                    ),
-                    child: Container(
-                      alignment: isFullyConnected ? Alignment.topCenter : Alignment.center,
-                      child: content,
-                    ),
+              return Stack(
+                children: [
+                  mainControls,
+                  DraggableMiniMascot(
+                    status: vpnProvider.vpnStatus,
                   ),
-                );
-              },
-            ),
+                ],
+              );
+            },
           ),
         ),
       ),
@@ -174,29 +219,74 @@ class _MyHomePageState extends State<MyHomePage>
 
   AppBar _buildAppBar(ThemeProvider themeProvider) {
     final theme = themeProvider.themeData;
+    final auth = context.watch<AuthProvider>();
+    final isPremium = SubscriptionService().isPremium;
+
+    final photoUrl = auth.photoUrl;
+    final name = auth.displayName.trim();
+    final initial = auth.isLoggedIn && name.isNotEmpty ? name.substring(0, 1).toUpperCase() : null;
+
+    Widget avatarInner;
+    if (photoUrl != null && photoUrl.isNotEmpty) {
+      avatarInner = ClipOval(
+        child: Image.network(
+          photoUrl,
+          width: 32,
+          height: 32,
+          fit: BoxFit.cover,
+          errorBuilder: (_, __, ___) => _buildAvatarFallback(theme, isPremium, initial),
+        ),
+      );
+    } else {
+      avatarInner = _buildAvatarFallback(theme, isPremium, initial);
+    }
+
+    Widget leadWidget = Container(
+      width: 34,
+      height: 34,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        border: Border.all(
+          color: isPremium
+              ? const Color(0xFFF6C453)
+              : (theme.iconTheme.color?.withValues(alpha: 0.25) ?? Colors.grey.withValues(alpha: 0.25)),
+          width: isPremium ? 1.8 : 1.2,
+        ),
+      ),
+      child: Center(child: avatarInner),
+    );
+
+    if (isPremium) {
+      leadWidget = Badge(
+        backgroundColor: const Color(0xFFF6C453),
+        smallSize: 9,
+        isLabelVisible: true,
+        child: leadWidget,
+      );
+    }
+
     return AppBar(
       backgroundColor: Colors.transparent,
       elevation: 0,
       centerTitle: true,
-      leading: IconButton(
-        icon: SubscriptionService().isPremium
-            ? const Badge(
-                backgroundColor: Color(0xFFF6C453),
-                smallSize: 10,
-                isLabelVisible: false,
-                child: Icon(Icons.person_rounded, color: Color(0xFFF6C453), size: 28),
-              )
-            : Icon(Icons.person_rounded, color: theme.iconTheme.color, size: 28),
-        onPressed: () => Navigator.push(
-          context,
-          MaterialPageRoute(builder: (context) => const AccountScreen()),
+      leading: Center(
+        child: InkWell(
+          borderRadius: BorderRadius.circular(20),
+          onTap: () => Navigator.push(
+            context,
+            MaterialPageRoute(builder: (context) => const AccountScreen()),
+          ),
+          onLongPress: AdminService().isAdmin
+              ? () => Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (context) => const AdminScreen()),
+                  )
+              : null,
+          child: Padding(
+            padding: const EdgeInsets.all(4.0),
+            child: leadWidget,
+          ),
         ),
-        onLongPress: AdminService().isAdmin
-            ? () => Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (context) => const AdminScreen()),
-                )
-            : null,
       ),
       title: Text(
         'WaledNet',
@@ -239,14 +329,42 @@ class _MyHomePageState extends State<MyHomePage>
     );
   }
 
-  Widget _buildConnectionDetails(VpnProvider vpnProvider) {
+  Widget _buildAvatarFallback(ThemeData theme, bool isPremium, String? initial) {
+    if (initial != null) {
+      return Container(
+        width: 32,
+        height: 32,
+        decoration: const BoxDecoration(
+          shape: BoxShape.circle,
+          color: Color(0xFF007AFF),
+        ),
+        child: Center(
+          child: Text(
+            initial,
+            style: const TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.bold,
+              fontSize: 14,
+            ),
+          ),
+        ),
+      );
+    }
+    return Icon(
+      Icons.person_rounded,
+      color: isPremium ? const Color(0xFFF6C453) : theme.iconTheme.color,
+      size: 22,
+    );
+  }
+
+  Widget _buildConnectionDetails(VpnProvider vpnProvider, {bool isDesktop = false}) {
     final isConnected = vpnProvider.vpnStatus == 'CONNECTED' ||
         vpnProvider.vpnStatus == 'CONNECTING';
     final isFullyConnected = vpnProvider.vpnStatus == 'CONNECTED';
 
     return Column(
       children: [
-        _buildSelectionMenus(vpnProvider),
+        _buildSelectionMenus(vpnProvider, isDesktop: isDesktop),
         SizedBox(height: isConnected ? 12 : 20),
         if (isFullyConnected)
           ConnectionStatusCard(
@@ -262,29 +380,48 @@ class _MyHomePageState extends State<MyHomePage>
     );
   }
 
-  Widget _buildSelectionMenus(VpnProvider vpnProvider) {
+  Widget _buildSelectionMenus(VpnProvider vpnProvider, {bool isDesktop = false}) {
+    final server = vpnProvider.selectedServer;
+
+    final serverTile = _buildSelectionTile(
+      label: 'السيرفر المختار',
+      title: server?.cleanName ?? 'Loading...',
+      server: server,
+      icon: Icons.dns_rounded,
+      iconColor: const Color(0xFF007AFF),
+      iconBgColor: const Color(0xFF007AFF).withValues(alpha: 0.12),
+      onTap: () => _showServerBottomSheet(vpnProvider),
+      trailing: _buildSelectedServerPingWidget(vpnProvider),
+      vpnProvider: vpnProvider,
+      compact: isDesktop,
+    );
+
+    final sniTile = _buildSelectionTile(
+      label: 'حزمة الشبكة (SNI)',
+      title: vpnProvider.selectedProfile?.displayName ?? 'Loading...',
+      icon: Icons.shield_outlined,
+      iconColor: const Color(0xFF5856D6),
+      iconBgColor: const Color(0xFF5856D6).withValues(alpha: 0.12),
+      onTap: () => _showProfileBottomSheet(vpnProvider),
+      vpnProvider: vpnProvider,
+      compact: isDesktop,
+    );
+
+    if (isDesktop) {
+      return Row(
+        children: [
+          Expanded(child: serverTile),
+          const SizedBox(width: 12),
+          Expanded(child: sniTile),
+        ],
+      );
+    }
+
     return Column(
       children: [
-        _buildSelectionTile(
-          label: 'السيرفر المختار',
-          title: vpnProvider.selectedServer?.name ?? 'Loading...',
-          icon: Icons.dns_rounded,
-          iconColor: const Color(0xFF007AFF), // iOS Blue
-          iconBgColor: const Color(0xFF007AFF).withOpacity(0.12),
-          onTap: () => _showServerBottomSheet(vpnProvider),
-          trailing: _buildSelectedServerPingWidget(vpnProvider),
-          vpnProvider: vpnProvider,
-        ),
+        serverTile,
         const SizedBox(height: 12),
-        _buildSelectionTile(
-          label: 'حزمة الشبكة (SNI)',
-          title: vpnProvider.selectedProfile?.displayName ?? 'Loading...',
-          icon: Icons.shield_outlined,
-          iconColor: const Color(0xFF5856D6), // iOS Purple
-          iconBgColor: const Color(0xFF5856D6).withOpacity(0.12),
-          onTap: () => _showProfileBottomSheet(vpnProvider),
-          vpnProvider: vpnProvider,
-        ),
+        sniTile,
       ],
     );
   }
@@ -292,105 +429,102 @@ class _MyHomePageState extends State<MyHomePage>
   Widget _buildSelectionTile({
     required String label,
     required String title,
+    VpnServer? server,
     required IconData icon,
     required Color iconColor,
     required Color iconBgColor,
     required VoidCallback onTap,
     Widget? trailing,
     required VpnProvider vpnProvider,
+    bool compact = false,
   }) {
     final theme = Theme.of(context);
     final themeProvider = Provider.of<ThemeProvider>(context, listen: false);
     final bool isDisabled = vpnProvider.isLoading;
 
-    return GestureDetector(
-      onTap: isDisabled ? null : onTap,
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(22),
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 25, sigmaY: 25),
-          child: Container(
-            height: 74,
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            decoration: BoxDecoration(
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: isDisabled ? null : onTap,
+        borderRadius: BorderRadius.circular(20),
+        child: Container(
+          height: 72,
+          padding: EdgeInsets.symmetric(horizontal: compact ? 12 : 16),
+          decoration: BoxDecoration(
+            color: themeProvider.isDarkMode
+                ? const Color(0xFF1C1C1E)
+                : Colors.white,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(
               color: themeProvider.isDarkMode
-                  ? Colors.white.withOpacity(0.06)
-                  : Colors.white.withOpacity(0.7),
-              borderRadius: BorderRadius.circular(22),
-              border: Border.all(
-                color: themeProvider.isDarkMode
-                    ? Colors.white.withOpacity(0.09)
-                    : Colors.black.withOpacity(0.05),
-                width: 1.0,
+                  ? const Color(0xFF2C2C2E)
+                  : const Color(0xFFE5E5EA),
+              width: 0.8,
+            ),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: compact ? 40 : 44,
+                height: compact ? 40 : 44,
+                padding: server != null ? EdgeInsets.all(compact ? 6 : 7) : EdgeInsets.zero,
+                decoration: BoxDecoration(
+                  color: iconBgColor,
+                  borderRadius: BorderRadius.circular(compact ? 13 : 14),
+                  border: Border.all(
+                    color: iconColor.withValues(alpha: 0.2),
+                    width: 1.0,
+                  ),
+                ),
+                child: server != null
+                    ? ClipRRect(
+                        borderRadius: BorderRadius.circular(compact ? 5 : 6),
+                        child: ServerFlagWidget(
+                          server: server,
+                          width: compact ? 28 : 30,
+                          height: compact ? 20 : 22,
+                        ),
+                      )
+                    : Icon(
+                        icon,
+                        color: iconColor,
+                        size: compact ? 20 : 22,
+                      ),
               ),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(themeProvider.isDarkMode ? 0.25 : 0.03),
-                  blurRadius: 20,
-                  offset: const Offset(0, 8),
-                ),
-              ],
-            ),
-            child: Row(
-              children: [
-                Container(
-                  width: 44,
-                  height: 44,
-                  decoration: BoxDecoration(
-                    color: iconBgColor,
-                    borderRadius: BorderRadius.circular(14),
-                    border: Border.all(
-                      color: iconColor.withOpacity(0.2),
-                      width: 1.0,
+              SizedBox(width: compact ? 10 : 14),
+              Expanded(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      label,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.textTheme.bodySmall?.color?.withValues(alpha: 0.4),
+                        fontSize: compact ? 10 : 11,
+                        fontWeight: FontWeight.w600,
+                        letterSpacing: 0.2,
+                      ),
+                      overflow: TextOverflow.ellipsis,
                     ),
-                  ),
-                  child: Icon(
-                    icon,
-                    color: iconColor,
-                    size: 22,
-                  ),
-                ),
-                const SizedBox(width: 14),
-                Expanded(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        label,
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: theme.textTheme.bodySmall?.color?.withOpacity(0.4),
-                          fontSize: 11,
-                          fontWeight: FontWeight.w600,
-                          letterSpacing: 0.2,
-                        ),
+                    SizedBox(height: compact ? 2 : 3),
+                    Text(
+                      title,
+                      style: theme.textTheme.bodyLarge?.copyWith(
+                        fontWeight: FontWeight.bold,
+                        fontSize: compact ? 14 : 15,
+                        letterSpacing: 0.1,
                       ),
-                      const SizedBox(height: 3),
-                      Text(
-                        title,
-                        style: theme.textTheme.bodyLarge?.copyWith(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 15,
-                          letterSpacing: 0.1,
-                        ),
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ],
-                  ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
                 ),
-                if (trailing != null) ...[
-                  const SizedBox(width: 8),
-                  trailing,
-                ] else ...[
-                  const SizedBox(width: 8),
-                  Icon(
-                    Icons.chevron_right_rounded,
-                    color: theme.textTheme.bodyMedium?.color?.withOpacity(0.25),
-                    size: 26,
-                  ),
-                ],
+              ),
+              if (trailing != null) ...[
+                SizedBox(width: compact ? 4 : 8),
+                trailing,
               ],
-            ),
+            ],
           ),
         ),
       ),
@@ -504,10 +638,5 @@ class _MyHomePageState extends State<MyHomePage>
         );
       },
     );
-  }
-
-  void _vpnListener() {
-    if (!mounted) return;
-    setState(() {});
   }
 }
