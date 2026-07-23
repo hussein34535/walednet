@@ -64,6 +64,7 @@ class VpnProvider with ChangeNotifier {
   int _downlink = 0;
   bool _isSshReconnecting = false;
   int _sshReconnectAttempt = 0;
+  bool _isReferralPremium = false;
   String? _deviceId;
   String? _lastAddedSni;
 
@@ -84,7 +85,7 @@ class VpnProvider with ChangeNotifier {
   void selectServer(VpnServer server) => handleSelectionChange(server);
   int get connectionTime => _connectionTime;
   bool get isExtendedConnection => _isExtendedConnection;
-  bool get isPremium => SubscriptionService().isPremium;
+  bool get isPremium => SubscriptionService().isPremium || _isReferralPremium;
   bool get isAdLoading => _isAdLoading;
   bool get isRewardedAdReady => _isRewardedAdReady;
   bool get isInterstitialAdReady => _isInterstitialAdReady;
@@ -521,6 +522,12 @@ class VpnProvider with ChangeNotifier {
     }
     if (_selectedProfile == null && _sniProfiles.isNotEmpty) {
       _selectedProfile = _sniProfiles.first;
+    }
+
+    final referralExpiry = prefs.getInt(_prefKey('referral_premium_expiry')) ?? 0;
+    if (referralExpiry > DateTime.now().millisecondsSinceEpoch) {
+      _isReferralPremium = true;
+      _connectionTime = 86400 * 365;
     }
   }
 
@@ -1015,6 +1022,15 @@ class VpnProvider with ChangeNotifier {
 
   void loadFreshRewardedAd() {
     _adService?.loadRewardedAd();
+  }
+
+  void activateReferralPremium(int hours) async {
+    _isReferralPremium = true;
+    _connectionTime = 86400 * 365;
+    final prefs = await SharedPreferences.getInstance();
+    final expiry = DateTime.now().add(Duration(hours: hours)).millisecondsSinceEpoch;
+    await prefs.setInt(_prefKey('referral_premium_expiry'), expiry);
+    notifyListeners();
   }
 
   void addExtraHours(int hours) {

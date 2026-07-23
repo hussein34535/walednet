@@ -60,7 +60,7 @@ class _ReferralDialogState extends State<ReferralDialog> {
 
     if (result.success && result.bonusHours > 0) {
       final vpnProvider = Provider.of<VpnProvider>(context, listen: false);
-      vpnProvider.addExtraHours(result.bonusHours);
+      vpnProvider.activateReferralPremium(result.bonusHours);
     }
   }
 
@@ -110,9 +110,10 @@ class _ReferralDialogState extends State<ReferralDialog> {
                       ),
                       const SizedBox(height: 2),
                       Text(
-                        'دعوة الأصدقاء وكسب ساعات مجانية',
+                        'احصل على شهر كامل بريميوم (30 يومًا) مجاناً 🎁',
                         style: theme.textTheme.bodySmall?.copyWith(
-                          color: theme.colorScheme.onSurface.withValues(alpha: 0.6),
+                          color: theme.colorScheme.primary,
+                          fontWeight: FontWeight.bold,
                         ),
                       ),
                     ],

@@ -104,20 +104,24 @@ class DeviceAuthenticityService {
       // 2. File system checks for QEMU & Emulator drivers
       if (!isEmulator) {
         for (final path in _knownEmulatorFiles) {
-          if (File(path).existsSync()) {
-            isEmulator = true;
-            failReason = 'تم اكتشاف سائق محاكي في النظام ($path)';
-            break;
-          }
+          try {
+            if (await File(path).exists()) {
+              isEmulator = true;
+              failReason = 'تم اكتشاف سائق محاكي في النظام ($path)';
+              break;
+            }
+          } catch (_) {}
         }
       }
 
       // 3. Root / Hooking check
       for (final path in _knownRootFiles) {
-        if (File(path).existsSync()) {
-          isRooted = true;
-          break;
-        }
+        try {
+          if (await File(path).exists()) {
+            isRooted = true;
+            break;
+          }
+        } catch (_) {}
       }
 
       // 4. App Cloning / Parallel Space Check

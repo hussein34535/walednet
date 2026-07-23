@@ -69,8 +69,8 @@ class ReferralService {
         final Map<String, dynamic> data = jsonDecode(response.body);
         return ClaimReferralResult(
           success: data['success'] as bool? ?? true,
-          message: data['message'] as String? ?? 'تم تفعيل كود الإحالة ونيل المكافأة بنجاح! 🎉',
-          bonusHours: (data['bonusHours'] as num?)?.toInt() ?? 24,
+          message: data['message'] as String? ?? 'تم تفعيل كود الإحالة والحصول على اشتراك بريميوم لمدة شهر كامل (30 يوم)! 🎉',
+          bonusHours: (data['bonusHours'] as num?)?.toInt() ?? 720,
         );
       } else {
         final Map<String, dynamic>? data = jsonDecode(response.body);
@@ -80,11 +80,9 @@ class ReferralService {
         );
       }
     } catch (e) {
-      // Fallback for offline / demo mode validation
       return ClaimReferralResult(
-        success: true,
-        message: 'تم تفعيل كود الإحالة ونيل مكافأة 24 ساعة بنجاح! 🎉',
-        bonusHours: 24,
+        success: false,
+        message: 'تعذر الاتصال بخادم الإحالات. يرجى التأكد من اتصالك بالإنترنت والمحاولة مجدداً.',
       );
     }
   }
