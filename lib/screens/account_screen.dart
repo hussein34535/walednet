@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:package_info_plus/package_info_plus.dart';
@@ -617,7 +618,7 @@ class _AccountScreenState extends State<AccountScreen>
             children: [
               _buildActionTile(
                 context,
-                icon: Icons.bar_chart_rounded,
+                svgAsset: 'assets/images/analytics.svg',
                 iconColor: const Color(0xFF007AFF),
                 title: 'إحصائيات استخدام البيانات 📊',
                 ink: ink,
@@ -629,9 +630,9 @@ class _AccountScreenState extends State<AccountScreen>
               _buildDivider(isDark),
               _buildActionTile(
                 context,
-                icon: Icons.card_giftcard_rounded,
+                svgAsset: 'assets/images/gift.svg',
                 iconColor: const Color(0xFF34C759),
-                title: 'نظام الإحالة كسب مكافآت',
+                title: 'نظام الإحالة كسب مكافآت 🎁',
                 ink: ink,
                 muted: muted,
                 onTap: () => ReferralDialog.show(context),
@@ -748,7 +749,8 @@ class _AccountScreenState extends State<AccountScreen>
 
   Widget _buildActionTile(
     BuildContext context, {
-    required IconData icon,
+    IconData? icon,
+    String? svgAsset,
     required Color iconColor,
     required String title,
     required Color ink,
@@ -760,26 +762,31 @@ class _AccountScreenState extends State<AccountScreen>
       color: Colors.transparent,
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(24),
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
           child: Row(
             children: [
               Container(
-                width: 40,
-                height: 40,
+                width: 44,
+                height: 44,
+                padding: svgAsset != null ? const EdgeInsets.all(9) : EdgeInsets.zero,
                 decoration: BoxDecoration(
                   color: iconColor.withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(12),
+                  borderRadius: BorderRadius.circular(14),
                 ),
-                child: Icon(icon, size: 20, color: iconColor),
+                child: svgAsset != null
+                    ? SvgPicture.asset(
+                        svgAsset,
+                        colorFilter: ColorFilter.mode(iconColor, BlendMode.srcIn),
+                      )
+                    : Icon(icon, size: 24, color: iconColor),
               ),
               const SizedBox(width: 14),
               Expanded(
                 child: Text(
                   title,
                   style: TextStyle(
-                    fontSize: 15,
+                    fontSize: 15.5,
                     fontWeight: FontWeight.w600,
                     color: titleColor ?? ink,
                   ),
@@ -787,7 +794,7 @@ class _AccountScreenState extends State<AccountScreen>
               ),
               Icon(
                 Icons.chevron_left_rounded,
-                color: muted.withValues(alpha: 0.4),
+                color: muted.withValues(alpha: 0.35),
                 size: 22,
               ),
             ],

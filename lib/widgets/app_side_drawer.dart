@@ -143,33 +143,34 @@ class _AppSideDrawerState extends State<AppSideDrawer> {
                         _sectionTitle('التفضيلات والمظهر'),
 
                         // Section 2: Dark Mode Toggle
-                        Container(
-                          margin: const EdgeInsets.only(bottom: 8),
-                          decoration: BoxDecoration(
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 8),
+                          child: Material(
                             color: isDark
                                 ? Colors.white.withValues(alpha: 0.05)
                                 : Colors.black.withValues(alpha: 0.03),
                             borderRadius: BorderRadius.circular(16),
-                          ),
-                          child: SwitchListTile(
-                            secondary: Container(
-                              padding: const EdgeInsets.all(8),
-                              decoration: BoxDecoration(
-                                color: const Color(0xFFFF9500).withValues(alpha: 0.12),
-                                borderRadius: BorderRadius.circular(12),
+                            clipBehavior: Clip.antiAlias,
+                            child: SwitchListTile(
+                              secondary: Container(
+                                padding: const EdgeInsets.all(8),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFFF9500).withValues(alpha: 0.12),
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                child: Icon(
+                                  isDark ? Icons.dark_mode_rounded : Icons.light_mode_rounded,
+                                  color: const Color(0xFFFF9500),
+                                  size: 20,
+                                ),
                               ),
-                              child: Icon(
-                                isDark ? Icons.dark_mode_rounded : Icons.light_mode_rounded,
-                                color: const Color(0xFFFF9500),
-                                size: 20,
+                              title: Text(
+                                isDark ? 'الوضع الليلي' : 'الوضع النهاري',
+                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
                               ),
+                              value: isDark,
+                              onChanged: (_) => themeProvider.toggleTheme(),
                             ),
-                            title: Text(
-                              isDark ? 'الوضع الليلي' : 'الوضع النهاري',
-                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
-                            ),
-                            value: isDark,
-                            onChanged: (_) => themeProvider.toggleTheme(),
                           ),
                         ),
 
@@ -440,46 +441,47 @@ class _AppSideDrawerState extends State<AppSideDrawer> {
     Color? titleColor,
     required VoidCallback onTap,
   }) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      decoration: BoxDecoration(
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Material(
         color: Theme.of(context).brightness == Brightness.dark
             ? Colors.white.withValues(alpha: 0.04)
             : Colors.black.withValues(alpha: 0.025),
         borderRadius: BorderRadius.circular(16),
-      ),
-      child: ListTile(
-        onTap: onTap,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        leading: Container(
-          padding: const EdgeInsets.all(8),
-          decoration: BoxDecoration(
-            color: iconColor.withValues(alpha: 0.12),
-            borderRadius: BorderRadius.circular(12),
+        clipBehavior: Clip.antiAlias,
+        child: ListTile(
+          onTap: onTap,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          leading: Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: iconColor.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Icon(icon, color: iconColor, size: 20),
           ),
-          child: Icon(icon, color: iconColor, size: 20),
-        ),
-        title: Text(
-          title,
-          style: TextStyle(
-            fontWeight: FontWeight.bold,
-            fontSize: 14,
-            color: titleColor ?? Theme.of(context).colorScheme.onSurface,
+          title: Text(
+            title,
+            style: TextStyle(
+              fontWeight: FontWeight.bold,
+              fontSize: 14,
+              color: titleColor ?? Theme.of(context).colorScheme.onSurface,
+            ),
           ),
-        ),
-        subtitle: subtitle != null
-            ? Text(
-                subtitle,
-                style: TextStyle(
-                  fontSize: 11.5,
-                  color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.5),
-                ),
-              )
-            : null,
-        trailing: Icon(
-          Icons.chevron_left_rounded,
-          size: 20,
-          color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.3),
+          subtitle: subtitle != null
+              ? Text(
+                  subtitle,
+                  style: TextStyle(
+                    fontSize: 11.5,
+                    color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.5),
+                  ),
+                )
+              : null,
+          trailing: Icon(
+            Icons.chevron_left_rounded,
+            size: 20,
+            color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.3),
+          ),
         ),
       ),
     );

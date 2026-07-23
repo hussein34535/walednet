@@ -1,5 +1,5 @@
-import 'dart:ui';
 import 'package:flutter/material.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:provider/provider.dart';
 import '../models/daily_usage.dart';
 import '../services/usage_tracker_service.dart';
@@ -17,10 +17,9 @@ class _UsageStatsScreenState extends State<UsageStatsScreen> {
   DailyUsage? _today;
   bool _loading = true;
 
-  static const _brandA = Color(0xFF4834D4);
-  static const _brandB = Color(0xFF6C5CE7);
-  static const _cyan = Color(0xFF007AFF);
-  static const _orange = Color(0xFFFF9500);
+  static const _appleBlue = Color(0xFF007AFF);
+  static const _appleOrange = Color(0xFFFF9500);
+  static const _appleIndigo = Color(0xFF5856D6);
 
   @override
   void initState() {
@@ -56,104 +55,87 @@ class _UsageStatsScreenState extends State<UsageStatsScreen> {
     final themeProvider = Provider.of<ThemeProvider>(context);
     final isDark = themeProvider.isDarkMode;
 
+    final bgColor = isDark ? const Color(0xFF000000) : const Color(0xFFF2F2F7);
+
     return Scaffold(
-      extendBodyBehindAppBar: true,
+      backgroundColor: bgColor,
       appBar: AppBar(
-        title: const Text('إحصائيات الاستخدام 📊'),
+        title: const Text(
+          'إحصائيات الاستخدام',
+          style: TextStyle(fontSize: 17, fontWeight: FontWeight.w600, letterSpacing: -0.3),
+        ),
         centerTitle: true,
-        backgroundColor: Colors.transparent,
+        backgroundColor: bgColor,
         elevation: 0,
+        scrolledUnderElevation: 0,
       ),
-      body: Container(
-        decoration: BoxDecoration(
-          color: theme.scaffoldBackgroundColor,
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: isDark
-                ? [
-                    const Color(0xFF0C0D14),
-                    const Color(0xFF161726),
-                  ]
-                : [
-                    const Color(0xFFF2F4F8),
-                    Colors.white,
-                  ],
-          ),
-        ),
-        child: SafeArea(
-          child: _loading
-              ? const Center(child: CircularProgressIndicator())
-              : RefreshIndicator(
-                  onRefresh: _loadData,
-                  child: ListView(
-                    padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
-                    physics: const BouncingScrollPhysics(),
-                    children: [
-                      // Today Hero Dashboard Card
-                      _buildTodayHeroCard(theme, isDark),
-                      const SizedBox(height: 24),
+      body: SafeArea(
+        child: _loading
+            ? const Center(child: CircularProgressIndicator())
+            : RefreshIndicator(
+                onRefresh: _loadData,
+                child: ListView(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  physics: const BouncingScrollPhysics(),
+                  children: [
+                    // Today Apple Card
+                    _buildTodayAppleCard(theme, isDark),
+                    const SizedBox(height: 22),
 
-                      // Section Title Row
-                      Row(
-                        children: [
-                          Container(
-                            padding: const EdgeInsets.all(6),
-                            decoration: BoxDecoration(
-                              color: _brandA.withValues(alpha: 0.12),
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: const Icon(
-                              Icons.calendar_month_rounded,
-                              size: 18,
-                              color: _brandB,
-                            ),
-                          ),
-                          const SizedBox(width: 10),
-                          Text(
-                            'سجل الاستخدام اليومي (آخر 30 يومًا)',
-                            style: theme.textTheme.titleMedium?.copyWith(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 15,
-                            ),
-                          ),
-                        ],
+                    // Section Title
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 4),
+                      child: Text(
+                        'سجل الاستخدام (آخر 30 يومًا)',
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: theme.colorScheme.onSurface.withValues(alpha: 0.5),
+                        ),
                       ),
-                      const SizedBox(height: 14),
+                    ),
+                    const SizedBox(height: 10),
 
-                      // List of Usage History
-                      if (_history.isEmpty)
-                        Container(
-                          padding: const EdgeInsets.all(32),
-                          alignment: Alignment.center,
-                          child: Column(
-                            children: [
-                              Icon(
-                                Icons.data_usage_rounded,
-                                size: 48,
-                                color: theme.colorScheme.onSurface.withValues(alpha: 0.3),
-                              ),
-                              const SizedBox(height: 12),
-                              Text(
-                                'لا يوجد سجل استهلاك بيانات سابق حتى الآن',
-                                style: theme.textTheme.bodyMedium?.copyWith(
-                                  color: theme.colorScheme.onSurface.withValues(alpha: 0.5),
-                                ),
-                              ),
-                            ],
+                    // List of Usage History (Apple Inset Grouped Container)
+                    if (_history.isEmpty)
+                      Container(
+                        padding: const EdgeInsets.all(32),
+                        alignment: Alignment.center,
+                        child: Text(
+                          'لا يوجد سجل استهلاك بيانات سابق حتى الآن',
+                          style: TextStyle(
+                            color: theme.colorScheme.onSurface.withValues(alpha: 0.4),
+                            fontSize: 14,
                           ),
-                        )
-                      else
-                        ..._history.map((usage) => _buildDayTile(usage, theme, isDark)),
-                    ],
-                  ),
+                        ),
+                      )
+                    else
+                      Container(
+                        decoration: BoxDecoration(
+                          color: isDark ? const Color(0xFF1C1C1E) : Colors.white,
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(
+                            color: isDark ? const Color(0xFF2C2C2E) : const Color(0xFFE5E5EA),
+                            width: 0.6,
+                          ),
+                        ),
+                        child: Column(
+                          children: _history.asMap().entries.map((entry) {
+                            final idx = entry.key;
+                            final usage = entry.value;
+                            final isLast = idx == _history.length - 1;
+                            return _buildAppleDayTile(usage, theme, isDark, isLast);
+                          }).toList(),
+                        ),
+                      ),
+                  ],
                 ),
-        ),
+              ),
       ),
     );
   }
 
-  Widget _buildTodayHeroCard(ThemeData theme, bool isDark) {
+  Widget _buildTodayAppleCard(ThemeData theme, bool isDark) {
     final usage = _today;
     final totalBytes = usage?.totalBytes ?? 0;
     final upBytes = usage?.uploadBytes ?? 0;
@@ -165,150 +147,126 @@ class _UsageStatsScreenState extends State<UsageStatsScreen> {
 
     final double downRatio = totalBytes > 0 ? (downBytes / totalBytes).clamp(0.05, 0.95) : 0.5;
 
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(28),
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
-        child: Container(
-          padding: const EdgeInsets.all(22),
-          decoration: BoxDecoration(
-            color: isDark
-                ? Colors.white.withValues(alpha: 0.06)
-                : Colors.white.withValues(alpha: 0.85),
-            borderRadius: BorderRadius.circular(28),
-            border: Border.all(
-              color: isDark
-                  ? Colors.white.withValues(alpha: 0.12)
-                  : Colors.black.withValues(alpha: 0.06),
-              width: 1.2,
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: _brandA.withValues(alpha: isDark ? 0.25 : 0.06),
-                blurRadius: 24,
-                offset: const Offset(0, 10),
-              ),
-            ],
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+    final cardBg = isDark ? const Color(0xFF1C1C1E) : Colors.white;
+    final borderColor = isDark ? const Color(0xFF2C2C2E) : const Color(0xFFE5E5EA);
+
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: cardBg,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: borderColor, width: 0.6),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              // Top Label & Date Badge
               Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Row(
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.all(8),
-                        decoration: BoxDecoration(
-                          gradient: const LinearGradient(colors: [_brandA, _brandB]),
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: const Icon(
-                          Icons.bar_chart_rounded,
-                          color: Colors.white,
-                          size: 18,
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      Text(
-                        'استهلاك اليوم',
-                        style: theme.textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 16,
-                        ),
-                      ),
-                    ],
-                  ),
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+                    width: 44,
+                    height: 44,
+                    padding: const EdgeInsets.all(9),
                     decoration: BoxDecoration(
-                      color: _brandA.withValues(alpha: 0.12),
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(color: _brandB.withValues(alpha: 0.3)),
+                      color: _appleBlue.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(14),
                     ),
-                    child: Text(
-                      _today?.date ?? 'اليوم',
-                      style: const TextStyle(
-                        color: _brandB,
-                        fontWeight: FontWeight.w800,
-                        fontSize: 12,
-                      ),
+                    child: SvgPicture.asset(
+                      'assets/images/analytics.svg',
+                      colorFilter: const ColorFilter.mode(_appleBlue, BlendMode.srcIn),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Text(
+                    'استهلاك اليوم',
+                    style: TextStyle(
+                      fontWeight: FontWeight.w600,
+                      fontSize: 15,
+                      color: theme.colorScheme.onSurface,
                     ),
                   ),
                 ],
               ),
-              const SizedBox(height: 20),
-
-              // Total Bytes Main Number Display
-              Center(
-                child: Column(
-                  children: [
-                    Text(
-                      totalStr,
-                      style: const TextStyle(
-                        fontSize: 36,
-                        fontWeight: FontWeight.w900,
-                        letterSpacing: 0.5,
-                        color: _cyan,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      'إجمالي الحركة التراكمية اليوم',
-                      style: TextStyle(
-                        fontSize: 12.5,
-                        color: theme.colorScheme.onSurface.withValues(alpha: 0.5),
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ],
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: _appleBlue.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Text(
+                  _today?.date ?? 'اليوم',
+                  style: const TextStyle(
+                    color: _appleBlue,
+                    fontWeight: FontWeight.w600,
+                    fontSize: 12,
+                  ),
                 ),
               ),
-              const SizedBox(height: 20),
+            ],
+          ),
+          const SizedBox(height: 18),
 
-              // Download / Upload Visual Bar Meter
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+          // Total Number
+          Center(
+            child: Column(
+              children: [
+                Text(
+                  totalStr,
+                  style: TextStyle(
+                    fontSize: 34,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: -0.5,
+                    color: theme.colorScheme.onSurface,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  'إجمالي حركة البيانات اليوم',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: theme.colorScheme.onSurface.withValues(alpha: 0.5),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 18),
+
+          // Progress Bar
+          ClipRRect(
+            borderRadius: BorderRadius.circular(4),
+            child: SizedBox(
+              height: 6,
+              child: Row(
                 children: [
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(8),
-                    child: SizedBox(
-                      height: 10,
-                      child: Row(
-                        children: [
-                          Expanded(
-                            flex: (downRatio * 100).toInt(),
-                            child: Container(color: _cyan),
-                          ),
-                          const SizedBox(width: 2),
-                          Expanded(
-                            flex: ((1.0 - downRatio) * 100).toInt(),
-                            child: Container(color: _orange),
-                          ),
-                        ],
-                      ),
-                    ),
+                  Expanded(
+                    flex: (downRatio * 100).toInt(),
+                    child: Container(color: _appleBlue),
+                  ),
+                  const SizedBox(width: 2),
+                  Expanded(
+                    flex: ((1.0 - downRatio) * 100).toInt(),
+                    child: Container(color: _appleOrange),
                   ),
                 ],
               ),
-              const SizedBox(height: 20),
+            ),
+          ),
+          const SizedBox(height: 18),
 
-              // 3 Metric Stat Pillars (Download, Upload, Sessions)
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceAround,
-                children: [
-                  _metricPillar('⬇️ التنزيل', downStr, _cyan, theme),
-                  Container(height: 32, width: 1, color: theme.dividerColor.withValues(alpha: 0.3)),
-                  _metricPillar('⬆️ الرفع', upStr, _orange, theme),
-                  Container(height: 32, width: 1, color: theme.dividerColor.withValues(alpha: 0.3)),
-                  _metricPillar('🔗 الجلسات', '${usage?.sessionCount ?? 0}', _brandB, theme),
-                ],
-              ),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceAround,
+            children: [
+              _metricPillar('⬇️ التنزيل', downStr, _appleBlue, theme),
+              Container(height: 24, width: 0.6, color: borderColor),
+              _metricPillar('⬆️ الرفع', upStr, _appleOrange, theme),
+              Container(height: 24, width: 0.6, color: borderColor),
+              _metricPillar('🔗 الجلسات', '${usage?.sessionCount ?? 0}', _appleIndigo, theme),
             ],
           ),
-        ),
+        ],
       ),
     );
   }
@@ -319,17 +277,17 @@ class _UsageStatsScreenState extends State<UsageStatsScreen> {
         Text(
           label,
           style: TextStyle(
-            fontSize: 12,
-            color: theme.colorScheme.onSurface.withValues(alpha: 0.6),
-            fontWeight: FontWeight.w600,
+            fontSize: 11.5,
+            color: theme.colorScheme.onSurface.withValues(alpha: 0.5),
+            fontWeight: FontWeight.w500,
           ),
         ),
-        const SizedBox(height: 4),
+        const SizedBox(height: 2),
         Text(
           value,
           style: TextStyle(
-            fontSize: 14.5,
-            fontWeight: FontWeight.w800,
+            fontSize: 14,
+            fontWeight: FontWeight.w600,
             color: color,
           ),
         ),
@@ -337,91 +295,73 @@ class _UsageStatsScreenState extends State<UsageStatsScreen> {
     );
   }
 
-  Widget _buildDayTile(DailyUsage usage, ThemeData theme, bool isDark) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      decoration: BoxDecoration(
-        color: isDark
-            ? Colors.white.withValues(alpha: 0.04)
-            : Colors.white,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(
-          color: isDark
-              ? Colors.white.withValues(alpha: 0.07)
-              : Colors.black.withValues(alpha: 0.05),
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: isDark ? 0.15 : 0.02),
-            blurRadius: 10,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(14),
-        child: Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(
-                color: _brandA.withValues(alpha: 0.1),
-                borderRadius: BorderRadius.circular(14),
-              ),
-              child: const Icon(
-                Icons.analytics_rounded,
-                color: _brandB,
-                size: 22,
-              ),
-            ),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    usage.date,
-                    style: const TextStyle(
-                      fontWeight: FontWeight.w800,
-                      fontSize: 14.5,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Row(
-                    children: [
-                      Text(
-                        '⬇️ ${_formatBytes(usage.downloadBytes)}',
-                        style: const TextStyle(fontSize: 12, color: _cyan, fontWeight: FontWeight.bold),
-                      ),
-                      const SizedBox(width: 10),
-                      Text(
-                        '⬆️ ${_formatBytes(usage.uploadBytes)}',
-                        style: const TextStyle(fontSize: 12, color: _orange, fontWeight: FontWeight.bold),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-              decoration: BoxDecoration(
-                color: _cyan.withValues(alpha: 0.1),
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: _cyan.withValues(alpha: 0.25)),
-              ),
-              child: Text(
-                _formatBytes(usage.totalBytes),
-                style: const TextStyle(
-                  fontWeight: FontWeight.w900,
-                  fontSize: 13.5,
-                  color: _cyan,
+  Widget _buildAppleDayTile(DailyUsage usage, ThemeData theme, bool isDark, bool isLast) {
+    final borderColor = isDark ? const Color(0xFF2C2C2E) : const Color(0xFFE5E5EA);
+
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          child: Row(
+            children: [
+              Container(
+                width: 30,
+                height: 30,
+                padding: const EdgeInsets.all(6),
+                decoration: BoxDecoration(
+                  color: _appleBlue.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: SvgPicture.asset(
+                  'assets/images/analytics.svg',
+                  colorFilter: const ColorFilter.mode(_appleBlue, BlendMode.srcIn),
                 ),
               ),
-            ),
-          ],
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      usage.date,
+                      style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
+                    ),
+                    const SizedBox(height: 2),
+                    Row(
+                      children: [
+                        Text(
+                          '⬇️ ${_formatBytes(usage.downloadBytes)}',
+                          style: const TextStyle(fontSize: 11.5, color: _appleBlue),
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          '⬆️ ${_formatBytes(usage.uploadBytes)}',
+                          style: const TextStyle(fontSize: 11.5, color: _appleOrange),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              Text(
+                _formatBytes(usage.totalBytes),
+                style: const TextStyle(
+                  fontWeight: FontWeight.w600,
+                  fontSize: 13.5,
+                  color: _appleBlue,
+                ),
+              ),
+            ],
+          ),
         ),
-      ),
+        if (!isLast)
+          Divider(
+            height: 1,
+            thickness: 0.6,
+            indent: 56,
+            color: borderColor,
+          ),
+      ],
     );
   }
 }
