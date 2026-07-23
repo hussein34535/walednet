@@ -7,6 +7,7 @@ import 'package:WaledNet/providers/auth_provider.dart';
 import 'package:WaledNet/services/subscription_service.dart';
 import 'package:WaledNet/theme/app_colors.dart';
 import 'package:WaledNet/theme_provider.dart';
+import 'package:WaledNet/widgets/referral_dialog.dart';
 
 class AccountScreen extends StatefulWidget {
   const AccountScreen({super.key});
@@ -613,6 +614,16 @@ class _AccountScreenState extends State<AccountScreen>
           ),
           child: Column(
             children: [
+              _buildActionTile(
+                context,
+                icon: Icons.card_giftcard_rounded,
+                iconColor: const Color(0xFF34C759),
+                title: 'نظام الإحالة كسب مكافآت',
+                ink: ink,
+                muted: muted,
+                onTap: () => ReferralDialog.show(context),
+              ),
+              _buildDivider(isDark),
               if (auth.isLoggedIn) ...[
                 _buildActionTile(
                   context,

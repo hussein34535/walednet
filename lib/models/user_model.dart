@@ -7,6 +7,10 @@ class UserModel {
   final bool isBanned;
   final DateTime? premiumActivatedAt;
   final String? premiumActivatedBy;
+  final String? referralCode;
+  final String? referredBy;
+  final int referralCount;
+  final int earnedHours;
   final DateTime createdAt;
   final DateTime updatedAt;
 
@@ -19,6 +23,10 @@ class UserModel {
     this.isBanned = false,
     this.premiumActivatedAt,
     this.premiumActivatedBy,
+    this.referralCode,
+    this.referredBy,
+    this.referralCount = 0,
+    this.earnedHours = 0,
     required this.createdAt,
     required this.updatedAt,
   });
@@ -33,6 +41,10 @@ class UserModel {
       isBanned: data['isBanned'] as bool? ?? false,
       premiumActivatedAt: _toDateTime(data['premiumActivatedAt']),
       premiumActivatedBy: data['premiumActivatedBy'] as String?,
+      referralCode: data['referralCode'] as String?,
+      referredBy: data['referredBy'] as String?,
+      referralCount: (data['referralCount'] as num?)?.toInt() ?? 0,
+      earnedHours: (data['earnedHours'] as num?)?.toInt() ?? 0,
       createdAt: _toDateTime(data['createdAt']) ?? DateTime.now(),
       updatedAt: _toDateTime(data['updatedAt']) ?? DateTime.now(),
     );
@@ -47,6 +59,10 @@ class UserModel {
       'isBanned': isBanned,
       'premiumActivatedAt': premiumActivatedAt,
       'premiumActivatedBy': premiumActivatedBy,
+      'referralCode': referralCode,
+      'referredBy': referredBy,
+      'referralCount': referralCount,
+      'earnedHours': earnedHours,
       'createdAt': createdAt,
       'updatedAt': updatedAt,
     };
@@ -58,6 +74,10 @@ class UserModel {
     String? premiumActivatedBy,
     String? displayName,
     String? photoUrl,
+    String? referralCode,
+    String? referredBy,
+    int? referralCount,
+    int? earnedHours,
   }) {
     return UserModel(
       uid: uid,
@@ -68,6 +88,10 @@ class UserModel {
       isBanned: isBanned ?? this.isBanned,
       premiumActivatedAt: isPremium == true ? DateTime.now() : premiumActivatedAt,
       premiumActivatedBy: premiumActivatedBy ?? this.premiumActivatedBy,
+      referralCode: referralCode ?? this.referralCode,
+      referredBy: referredBy ?? this.referredBy,
+      referralCount: referralCount ?? this.referralCount,
+      earnedHours: earnedHours ?? this.earnedHours,
       createdAt: createdAt,
       updatedAt: DateTime.now(),
     );

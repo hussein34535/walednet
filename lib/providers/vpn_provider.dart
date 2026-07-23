@@ -1017,6 +1017,12 @@ class VpnProvider with ChangeNotifier {
     _adService?.loadRewardedAd();
   }
 
+  void addExtraHours(int hours) {
+    _connectionTime += hours * 3600;
+    _isExtendedConnection = true;
+    notifyListeners();
+  }
+
   void extendConnection() {
     if (SubscriptionService().isPremium) {
       return;
