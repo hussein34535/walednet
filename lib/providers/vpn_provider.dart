@@ -65,6 +65,7 @@ class VpnProvider with ChangeNotifier {
   bool _isSshReconnecting = false;
   int _sshReconnectAttempt = 0;
   bool _isReferralPremium = false;
+  int _referralExpiryMs = 0;
   String? _deviceId;
   String? _lastAddedSni;
 
@@ -85,7 +86,17 @@ class VpnProvider with ChangeNotifier {
   void selectServer(VpnServer server) => handleSelectionChange(server);
   int get connectionTime => _connectionTime;
   bool get isExtendedConnection => _isExtendedConnection;
-  bool get isPremium => SubscriptionService().isPremium || _isReferralPremium;
+
+  bool get _checkReferralValid {
+    if (_referralExpiryMs == 0) return _isReferralPremium;
+    final isValid = DateTime.now().millisecondsSinceEpoch < _referralExpiryMs;
+    if (!isValid && _isReferralPremium) {
+      _isReferralPremium = false;
+    }
+    return isValid && _isReferralPremium;
+  }
+
+  bool get isPremium => SubscriptionService().isPremium || _checkReferralValid;
   bool get isAdLoading => _isAdLoading;
   bool get isRewardedAdReady => _isRewardedAdReady;
   bool get isInterstitialAdReady => _isInterstitialAdReady;
@@ -525,9 +536,14 @@ class VpnProvider with ChangeNotifier {
     }
 
     final referralExpiry = prefs.getInt(_prefKey('referral_premium_expiry')) ?? 0;
-    if (referralExpiry > DateTime.now().millisecondsSinceEpoch) {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    if (referralExpiry > now) {
       _isReferralPremium = true;
-      _connectionTime = 86400 * 365;
+      _referralExpiryMs = referralExpiry;
+      _connectionTime = ((referralExpiry - now) ~/ 1000);
+    } else {
+      _isReferralPremium = false;
+      _referralExpiryMs = 0;
     }
   }
 
@@ -1026,10 +1042,10 @@ class VpnProvider with ChangeNotifier {
 
   void activateReferralPremium(int hours) async {
     _isReferralPremium = true;
-    _connectionTime = 86400 * 365;
+    _referralExpiryMs = DateTime.now().add(Duration(hours: hours)).millisecondsSinceEpoch;
+    _connectionTime = hours * 3600;
     final prefs = await SharedPreferences.getInstance();
-    final expiry = DateTime.now().add(Duration(hours: hours)).millisecondsSinceEpoch;
-    await prefs.setInt(_prefKey('referral_premium_expiry'), expiry);
+    await prefs.setInt(_prefKey('referral_premium_expiry'), _referralExpiryMs);
     notifyListeners();
   }
 
